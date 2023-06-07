@@ -6,32 +6,31 @@ it does not seem to be - but who cares...
 
 """
 
-import matplotlib as mpl
+from functools import partial
 import math
+
+import matplotlib as mpl
 import matplotlib.pyplot as plt
+import matplotlib.transforms as mtransforms
 from matplotlib.patches import Patch
+
 import numpy as np
 import pandas as pd
 from scipy.stats import binomtest
 from statsmodels.stats.multitest import multipletests
 
 
-mpl.rcParams['font.family'] = "sans-serif"
-
-
 def binbin(x, y, gridsize, **xargs):
     """
     Calculate bin ids for hexbin assignment.
 
-    does not work with logscale!
+    Does not work with logscale!
     
-    code graciously borrowed from matplotlib - because tbh - I do
-    not quite understand what happens here....
-    
+    Code graciously borrowed from the matplotlib library
+    - because tbh - I do not quite understand how they do it...
+
     """
 
-    import matplotlib.transforms as mtransforms
-    
     # Set the size of the hexagon grid
     if np.iterable(gridsize):
         nx, ny = gridsize
@@ -85,6 +84,9 @@ def binbin(x, y, gridsize, **xargs):
     d2 = (ix - ix2 - 0.5) ** 2 + 3.0 * (iy - iy2 - 0.5) ** 2
     bdist = (d1 < d2)
     
+    # here I take over again
+    # calculate per orignal data point the
+    # final hexbin ID.
     idb1 = pd.Series(i1) - 1
     idb2 = pd.Series(i2) + (nx1 * ny1 - 1)
     idb1.loc[~bdist] = idb2.loc[~bdist]
@@ -92,10 +94,10 @@ def binbin(x, y, gridsize, **xargs):
 
 
 def get_array_diffscore(C, diff_a, diff_b, diff_groupby,
-                        diff_agg_func, **hbargs):
+                        agg_func, **hbargs):
     """
     Prepare the array for diff-score calculation
-    Also, execute the diff_agg_func & 
+    Also, execute the agg_func & 
     """
     if diff_b is None:
         diff_b = ~diff_a
@@ -106,8 +108,22 @@ def get_array_diffscore(C, diff_a, diff_b, diff_groupby,
         a=diff_a, b=diff_b, v=C,
         bin=list(bins)))
 
-    arr = diff_agg_func(D).sort_index()
-    return arr
+    arr = agg_func(D).sort_index()
+    return D, arr
+
+
+def get_array_score(C, agg_func,
+                    **hbargs):
+    """
+    Prepare the array for score calculation
+    And execute the agg_func
+    """
+    bins = binbin(**hbargs)
+    
+    D = pd.DataFrame(dict(
+        v=C, bin=bins))
+    arr = agg_func(D).sort_index()
+    return D, arr
 
 
 def get_hexbin_diffcount(ax, obs, diff_a, diff_b, diff_groupby,
@@ -187,6 +203,13 @@ def get_hexbin_categorical(ax, C, **hbargs):
                    **hbargs)   
     
 
+def agg_generic(D, aggfunc=np.mean):
+    agg = pd.DataFrame(dict(
+        score = D.groupby('bin')['v'].agg(aggfunc),
+        count = D.groupby('bin')['v'].count()
+        ))
+    return agg
+    
 def agg_diff_lfc(D, norm=False, aggfunc=np.mean):
     "Take LFC of normalized means per bin."
 
@@ -203,6 +226,7 @@ def agg_diff_lfc(D, norm=False, aggfunc=np.mean):
 
     agg['cnt_a'] = agg['cnt_a'].fillna(0).astype(int)
     agg['cnt_b'] = agg['cnt_b'].fillna(0).astype(int)
+    agg['count'] = np.minimum(agg['cnt_a'], agg['cnt_b'])
     
     agg['score'] = (np.log2(agg['a'] / agg['b']))\
         .replace([-np.inf, np.inf], 0)\
@@ -219,14 +243,6 @@ def agg_diff_mwu(D, norm=True):
     if norm:
         D.loc[D.a, 'v'] = D.loc[D.a, 'v'] / D.loc[D.a, 'v'].mean()
         D.loc[D.b, 'v'] = D.loc[D.b, 'v'] / D.loc[D.b, 'v'].mean()
-
-    def mwu(x):
-        print(type(x))
-        
-        #aa = x['a']
-        #bb = x['b']
-        
-        #p#rint(aa, bb)
 
     gb = D.groupby('bin')
     rv = {}
@@ -275,39 +291,27 @@ def hexbinplot(adata,
                mask_count=0, mask_alpha=0.5, 
                title=None,
                use_rep='X_umap',
+               agg_func=None,
                
                diff_a=None,
                diff_b=None,
                diff_groupby=None,
-               diff_agg_func=None,
+
                **kwargs):
 
     
     x = adata.obsm[use_rep][:,0]
     y = adata.obsm[use_rep][:,1]
-    
 
+    # To be implemented
     assert diff_groupby is None
-    if diff_agg_func is None:
-        diff_agg_func = agg_diff_lfc
-        
-    if isinstance(cmap, str):
-        cmap_ = mpl.colormaps[cmap]
-    else:
-        #assume proper colormap
-        cmap_ = cmap
-            
+
+    
     if ax is None:
         ax = plt.gca()
             
-    # calculate counts for transparancy
-    if mask_count > 0:
-        hb = ax.hexbin(x=x, y=y, C=[1] * len(x), reduce_C_function=np.sum,
-                       gridsize=gridsize, visible=False, mincnt=1)
-        counts = hb.get_array()
-    
     hbargs = a = dict(x=x, y=y, gridsize=gridsize, cmap=cmap, 
-             linewidths=linewidths, mincnt=1,
+             linewidths=linewidths, mincnt=0,
              edgecolors='black')
             
     # check for a categorical column
@@ -319,25 +323,42 @@ def hexbinplot(adata,
 
     if col == 'count':
         modus = 'count'
+        
     elif str(adata.obs[col].dtype) == 'category':
         assert diff is False  ## not allowed 
         modus = 'cat'
-    
-    diffargs = dict(diff_a=diff_a,
-                    diff_b=diff_b,
-                    diff_groupby=diff_groupby,
-                    diff_agg_func=diff_agg_func)
-    
+
+        
+    # determine how to aggregate
+    if agg_func is None:
+        if diff:
+            agg_func = agg_diff_lfc
+        elif modus == 'count':
+            agg_func = partial(agg_generic, aggfunc=np.sum)
+        else:
+            agg_func = partial(agg_generic, aggfunc=np.mean)
+
+    if diff:
+        aggargs = dict(diff_a=diff_a,
+                       diff_b=diff_b,
+                       diff_groupby=diff_groupby,
+                       agg_func=agg_func)
+    else:
+        aggargs = dict(agg_func=agg_func)
+
     if modus == 'cat':
         hb = get_hexbin_categorical(ax, adata.obs[col], **hbargs)
-        
     elif modus == 'score':
         hb = ax.hexbin(C=adata.obs[col], **hbargs)
         if diff:
-            aggdata = get_array_diffscore(
-                adata.obs[col], **hbargs, **diffargs)            
-            hb.set(array=aggdata['score'])
-            
+            _raw, aggdata = get_array_diffscore(
+                adata.obs[col], **hbargs, **aggargs)            
+        else:
+            _raw, aggdata = get_array_score(
+                adata.obs[col], **hbargs, **aggargs)
+        hb.set(array=aggdata['score'])
+        #print(aggdata)
+        
     elif modus == 'count':
         if not diff:
             hb = ax.hexbin(**hbargs)
@@ -348,36 +369,36 @@ def hexbinplot(adata,
         raise NotImplementedError()
     
     varray = pd.Series(hb.get_array())
-    #calculate vmin & vmax if required
 
-    if modus != 'cat' and (vmin is None or vmax is None):
-        if vmin is None:
-            vmin = np.quantile(varray, nrm)
-        if vmax is None:
-            vmax = np.quantile(varray, 1-nrm)
-        # vmid = (0.5 * (vmax - vmin)) + vmin
+    
+    # (re-) calculate vmin & vmax if required
+    if modus != 'cat':
+
+        if vmin is None or vmax is None:
+            if vmin is None:
+                vmin = np.quantile(varray, nrm)
+            if vmax is None:
+                vmax = np.quantile(varray, 1-nrm)
+
+            #if vzerosym and vmin <= 0 and vmax >= 0:
+            #    vext = max(abs(vmin), vmax)
+            #    vmin, vmax = -vext, vext
+        
     hb.set_norm(mpl.colors.Normalize(vmin=vmin, vmax=vmax))
 
-    if vzerosym and vmin <= 0 and vmax > 0:
-        vext = max(abs(vmin), vmax)
-        vmin, vmax = -vext, vext
-        
-    if mask_count > 0 and col != 'count':
-        alphas = []
-        for c in counts:
-            if c < mask_count:
-                alphas.append(mask_alpha)
-            else:
-                alphas.append(1)        
-        
+    # ensure proper colormap instance
+    cmap_ = cmap
+    if isinstance(cmap, str):
+        cmap_ = mpl.colormaps[cmap]
+
     if modus == 'cat':
         # ensure we properly call face colors for category modus
         # eg - prevent no normalization, ensure values are integers
-        # otherwise it becomes difficult to call 
+        # otherwise it becomes difficult to call
+
         face_colors = [cmap_(x) for x in varray.astype(int)]
         hb.set(facecolors=face_colors)
-                
-        
+
     # onto the visuals...
     #
     # add a little space around the plot:
@@ -388,19 +409,17 @@ def hexbinplot(adata,
     ax.set_xlim(xmin-xd, xmax+xd)
     ax.set_ylim(ymin-yd, ymax+yd)
 
-    cnorm=hb.norm
     if title is None:
         title = col
     ax.set_title(title, fontsize=tfs)
 
     if modus != 'cat':
-        
+        cnorm=hb.norm
         legend_elements = [
             Patch(facecolor=cmap_(cnorm(vmin)), edgecolor='k', 
-                linewidth=0.3, label=f"{vmin:.1g}"),
+                  linewidth=0.3, label=f"{vmin:.1f}"),
             Patch(facecolor=cmap_(cnorm(vmax)), edgecolor='k', 
-                linewidth=0.3, label=f"{vmax:.1g}"),
-        ]
+                  linewidth=0.3, label=f"{vmax:.1f}"), ]
     
         legend = ax.legend(handles=legend_elements, loc='lower left', 
                            handlelength=0.9, 
