@@ -191,13 +191,15 @@ def get_hexbin_categorical(ax, C, **hbargs):
         values, counts = np.unique(values, return_counts=True)
         # display value with highest frequency
         rv = values[counts.argmax()]
-        return rv
+        return int(rv)
 
     try:
         C = C.astype(int)
     except:
         C = C.cat.codes
 
+    print(pd.Series(C).value_counts())
+    
     return ax.hexbin(C=C, 
                    reduce_C_function=_most_abundant,
                    **hbargs)   
@@ -348,6 +350,7 @@ def hexbinplot(adata,
 
     if modus == 'cat':
         hb = get_hexbin_categorical(ax, adata.obs[col], **hbargs)
+        
     elif modus == 'score':
         hb = ax.hexbin(C=adata.obs[col], **hbargs)
         if diff:
@@ -357,7 +360,6 @@ def hexbinplot(adata,
             _raw, aggdata = get_array_score(
                 adata.obs[col], **hbargs, **aggargs)
         hb.set(array=aggdata['score'])
-        #print(aggdata)
         
     elif modus == 'count':
         if not diff:
@@ -370,7 +372,6 @@ def hexbinplot(adata,
     
     varray = pd.Series(hb.get_array())
 
-    
     # (re-) calculate vmin & vmax if required
     if modus != 'cat':
 
@@ -391,13 +392,14 @@ def hexbinplot(adata,
     if isinstance(cmap, str):
         cmap_ = mpl.colormaps[cmap]
 
+    
     if modus == 'cat':
         # ensure we properly call face colors for category modus
         # eg - prevent no normalization, ensure values are integers
         # otherwise it becomes difficult to call
-
+        
         face_colors = [cmap_(x) for x in varray.astype(int)]
-        hb.set(facecolors=face_colors)
+        hb.set(array=None, facecolors=face_colors)
 
     # onto the visuals...
     #
