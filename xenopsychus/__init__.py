@@ -198,8 +198,6 @@ def get_hexbin_categorical(ax, C, **hbargs):
     except:
         C = C.cat.codes
 
-    print(pd.Series(C).value_counts())
-    
     return ax.hexbin(C=C, 
                    reduce_C_function=_most_abundant,
                    **hbargs)   
