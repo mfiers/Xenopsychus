@@ -8,7 +8,8 @@ it does not seem to be - but who cares...
 
 from functools import partial
 import math
-
+import warnings
+    
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
@@ -112,6 +113,29 @@ def get_array_diffscore(C, diff_a, diff_b, diff_groupby,
     return D, arr
 
 
+
+
+def find_borders(row, q, direction):    
+    dx, dy = dict(
+        left=(0, -2),
+        topleft = (1, -1),
+        topright = (1, 1),
+        right=(0, 2),
+        bottomleft = (-1, -1),
+        bottomright = (-1, 1),
+    )[direction]
+        
+    x = row['r1'] + dx
+    y = row['r0'] + dy
+    oc = q[(q.r1 == x) & (q.r0 == y)]
+    if len(oc) == 0:
+        return 1
+    elif oc.iloc[0]['array'] == row['array']:
+        return 0
+    else:
+        return 2
+        
+
 def get_array_score(C, agg_func,
                     **hbargs):
     """
@@ -155,7 +179,7 @@ def get_hexbin_diffcount(ax, obs, diff_a, diff_b, diff_groupby,
     D = pd.DataFrame(dict(a=arr_a, b=arr_b)).fillna(0).astype(int)
     sum_a, sum_b = D.sum()
     allfrac = sum_a / (sum_a + sum_b)
-
+    
     def bt(row):
         if row.sum() == 0:
             return 1.
@@ -179,6 +203,7 @@ def get_hexbin_diffcount(ax, obs, diff_a, diff_b, diff_groupby,
         hb.set(array=D['slp'])
     else:
         hb.set(array=lor)
+        
     return hb
 
 
@@ -287,17 +312,34 @@ def hexbinplot(adata,
                vmin=None, vmax=None,
                vzerosym=True,
                edgenrm=0.1,
-               legend_fontsize=7, linewidths=0.5, 
+               legend=True,
+               legend_fontsize=7,
+               lw=0.5,
+               linewidths=None, 
                mask_count=0, mask_alpha=0.5, 
                title=None,
+               title_pad=6,
                use_rep='X_umap',
                agg_func=None,
+
+               marker=None,
+               marker_color='white',
+               marker_lw=4,
+               marker_outline=True,
                
                diff_a=None,
                diff_b=None,
                diff_groupby=None,
 
                **kwargs):
+
+
+
+    
+    # fix some strange parameter names
+    if linewidths is not None:
+        warnings.warn("Please use `lw=` instead of `linewidths`")
+        lw = linewidths
 
     
     x = adata.obsm[use_rep][:,0]
@@ -311,7 +353,7 @@ def hexbinplot(adata,
         ax = plt.gca()
             
     hbargs = a = dict(x=x, y=y, gridsize=gridsize, cmap=cmap, 
-             linewidths=linewidths, mincnt=0,
+             linewidths=lw, mincnt=0,
              edgecolors='black')
             
     # check for a categorical column
@@ -328,6 +370,11 @@ def hexbinplot(adata,
         assert diff is False  ## not allowed 
         modus = 'cat'
 
+    if marker is not None:
+        fig = ax.figure
+        ax2 = fig.add_subplot(111)
+        hb_marker = get_hexbin_categorical(ax2, adata.obs[marker], **hbargs)
+        fig.delaxes(ax2)
         
     # determine how to aggregate
     if agg_func is None:
@@ -348,7 +395,7 @@ def hexbinplot(adata,
 
     if modus == 'cat':
         hb = get_hexbin_categorical(ax, adata.obs[col], **hbargs)
-        
+
     elif modus == 'score':
         hb = ax.hexbin(C=adata.obs[col], **hbargs)
         if diff:
@@ -361,6 +408,7 @@ def hexbinplot(adata,
         
     elif modus == 'count':
         if not diff:
+            hbargs['mincnt'] = 1
             hb = ax.hexbin(**hbargs)
         else:
             hb = get_hexbin_diffcount(ax, adata.obs,
@@ -390,7 +438,37 @@ def hexbinplot(adata,
     if isinstance(cmap, str):
         cmap_ = mpl.colormaps[cmap]
 
-    
+    if marker is not None:
+
+        valldata = pd.DataFrame(hb_marker.get_offsets())
+        valldata['array'] = pd.Series(hb_marker.get_array())
+        valldata['r0'] = valldata[0].rank(method='dense').astype(int)
+        valldata['r1'] = valldata[1].rank(method='dense').astype(int)
+
+        #marker_cmap_ = marker_cmap
+        #if isinstance(marker_cmap, str):
+        #    maker_cmap_ = mpl.colormaps[marker_cmap]            
+        #marker_face_colors = [marker_cmap_(x) for x in valldata['array'].astype(int)]
+      
+        vertices = hb_marker.get_paths()[0].vertices
+        dirsel = [('right', slice(0,2)), 
+                  ('topright', slice(1,3)),
+                  ('topleft', slice(2,4)),
+                  ('left', slice(3,5)), 
+                  ('bottomleft', slice(4,6)),
+                  ('bottomright', slice(5,7)),
+                 ]
+
+        rcutoff = 1 if marker_outline else 2
+        for direction, vsel in dirsel: 
+            borders = valldata.apply(find_borders, q=valldata, direction=direction, axis=1)
+            for i, (_, r) in enumerate(borders.items()):
+                if r >=rcutoff:
+                    xx = vertices[vsel, 0] + valldata.iloc[i][0]
+                    yy = vertices[vsel, 1] + valldata.iloc[i][1]
+                    ax.plot(xx, yy, c=marker_color, zorder=10, lw=marker_lw,)
+
+        
     if modus == 'cat':
         # ensure we properly call face colors for category modus
         # eg - prevent no normalization, ensure values are integers
@@ -398,6 +476,8 @@ def hexbinplot(adata,
         
         face_colors = [cmap_(x) for x in varray.astype(int)]
         hb.set(array=None, facecolors=face_colors)
+
+
 
     # onto the visuals...
     #
@@ -411,9 +491,10 @@ def hexbinplot(adata,
 
     if title is None:
         title = col
-    ax.set_title(title, fontsize=tfs)
+    ax.set_title(title, pad=title_pad, fontsize=tfs)
 
-    if modus != 'cat':
+
+    if legend and modus != 'cat':
         cnorm=hb.norm
         legend_elements = [
             Patch(facecolor=cmap_(cnorm(vmin)), edgecolor='k', 
@@ -438,3 +519,14 @@ def hexbinplot(adata,
     ax.spines['bottom'].set_visible(False)
   
     return hb
+
+
+
+def hide_axes(ax):
+    """Helper function to hide axis in a gridplot"""
+    ax.get_xaxis().set_visible(False)
+    ax.get_yaxis().set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
