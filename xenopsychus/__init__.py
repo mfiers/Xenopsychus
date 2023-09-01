@@ -113,8 +113,6 @@ def get_array_diffscore(C, diff_a, diff_b, diff_groupby,
     return D, arr
 
 
-
-
 def find_borders(row, q, direction):    
     dx, dy = dict(
         left=(0, -2),
@@ -207,26 +205,33 @@ def get_hexbin_diffcount(ax, obs, diff_a, diff_b, diff_groupby,
     return hb
 
 
-def get_hexbin_categorical(ax, C, **hbargs):
+def get_hexbin_categorical(ax, C, generate_OR=False, **hbargs):
 
     def _most_abundant(values):
         # return most abundant value for when we'er in category modus
         
         # find frequency of each value
-        values, counts = np.unique(values, return_counts=True)
-        # display value with highest frequency
-        rv = values[counts.argmax()]
-        return int(rv)
+        vc = pd.Series(values).value_counts()
+        return vc.index[0]
+    
+
+    def _OR(values):
+        vc = pd.Series(values).value_counts()
+        if len(vc) == 1:
+            return 100
+        elif len(vc) > 1:
+            return vc.iloc[0] / vc.iloc[1]
+        else:
+            return 1
 
     try:
         C = C.astype(int)
     except:
         C = C.cat.codes
 
-    return ax.hexbin(C=C, 
-                   reduce_C_function=_most_abundant,
-                   **hbargs)   
-    
+    rf = _OR if generate_OR else _most_abundant
+    return ax.hexbin(C=C, reduce_C_function=rf, **hbargs)
+
 
 def agg_generic(D, aggfunc=np.mean):
     agg = pd.DataFrame(dict(
@@ -234,7 +239,8 @@ def agg_generic(D, aggfunc=np.mean):
         count = D.groupby('bin')['v'].count()
         ))
     return agg
-    
+
+
 def agg_diff_lfc(D, norm=False, aggfunc=np.mean):
     "Take LFC of normalized means per bin."
 
@@ -375,7 +381,15 @@ def hexbinplot(adata,
         ax2 = fig.add_subplot(111)
         hb_marker = get_hexbin_categorical(ax2, adata.obs[marker], **hbargs)
         fig.delaxes(ax2)
-        
+
+    if modus == 'cat':
+        # calculate ORs for alpha's later onto
+        fig = ax.figure
+        ax2 = fig.add_subplot(111)
+        hb_cator = get_hexbin_categorical(ax2, adata.obs[col], generate_OR=True, **hbargs)
+        fig.delaxes(ax2)
+
+    
     # determine how to aggregate
     if agg_func is None:
         if diff:
@@ -396,6 +410,7 @@ def hexbinplot(adata,
     if modus == 'cat':
         hb = get_hexbin_categorical(ax, adata.obs[col], **hbargs)
 
+        
     elif modus == 'score':
         hb = ax.hexbin(C=adata.obs[col], **hbargs)
         if diff:
@@ -410,6 +425,7 @@ def hexbinplot(adata,
         if not diff:
             hbargs['mincnt'] = 1
             hb = ax.hexbin(**hbargs)
+            print("Mean no per bin", hb.get_array().mean())
         else:
             hb = get_hexbin_diffcount(ax, adata.obs,
                                       **hbargs, **diffargs)
@@ -430,6 +446,7 @@ def hexbinplot(adata,
             #if vzerosym and vmin <= 0 and vmax >= 0:
             #    vext = max(abs(vmin), vmax)
             #    vmin, vmax = -vext, vext
+
         
     hb.set_norm(mpl.colors.Normalize(vmin=vmin, vmax=vmax))
 
@@ -438,6 +455,7 @@ def hexbinplot(adata,
     if isinstance(cmap, str):
         cmap_ = mpl.colormaps[cmap]
 
+    
     if marker is not None:
 
         valldata = pd.DataFrame(hb_marker.get_offsets())
@@ -445,6 +463,7 @@ def hexbinplot(adata,
         valldata['r0'] = valldata[0].rank(method='dense').astype(int)
         valldata['r1'] = valldata[1].rank(method='dense').astype(int)
 
+        
         #marker_cmap_ = marker_cmap
         #if isinstance(marker_cmap, str):
         #    maker_cmap_ = mpl.colormaps[marker_cmap]            
@@ -463,7 +482,7 @@ def hexbinplot(adata,
         for direction, vsel in dirsel: 
             borders = valldata.apply(find_borders, q=valldata, direction=direction, axis=1)
             for i, (_, r) in enumerate(borders.items()):
-                if r >=rcutoff:
+                if r >= rcutoff:
                     xx = vertices[vsel, 0] + valldata.iloc[i][0]
                     yy = vertices[vsel, 1] + valldata.iloc[i][1]
                     ax.plot(xx, yy, c=marker_color, zorder=10, lw=marker_lw,)
@@ -473,9 +492,18 @@ def hexbinplot(adata,
         # ensure we properly call face colors for category modus
         # eg - prevent no normalization, ensure values are integers
         # otherwise it becomes difficult to call
-        
+        def get_cmap(x):
+            if x == -1:
+                return 'pink'
+            else:
+                return cmap_(x)
+            
         face_colors = [cmap_(x) for x in varray.astype(int)]
-        hb.set(array=None, facecolors=face_colors)
+        alphas = (pd.Series(hb_cator.get_array() ) > 1.5).astype(float)
+        alphas *= 0.5
+        alphas += 0.5
+        
+        hb.set(array=None, facecolors=face_colors, alpha=alphas)
 
 
 
@@ -494,6 +522,7 @@ def hexbinplot(adata,
     ax.set_title(title, pad=title_pad, fontsize=tfs)
 
 
+        
     if legend and modus != 'cat':
         cnorm=hb.norm
         legend_elements = [
@@ -517,7 +546,10 @@ def hexbinplot(adata,
     ax.spines['top'].set_visible(False)
     ax.spines['left'].set_visible(False)
     ax.spines['bottom'].set_visible(False)
-  
+
+    # add per point bin ids
+    hb.xeno_bin_ids = binbin(**hbargs)
+    
     return hb
 
 
