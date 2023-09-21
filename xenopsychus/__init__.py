@@ -100,6 +100,7 @@ def get_array_diffscore(C, diff_a, diff_b, diff_groupby,
     Prepare the array for diff-score calculation
     Also, execute the agg_func &
     """
+
     if diff_b is None:
         diff_b = ~diff_a
 
@@ -108,6 +109,8 @@ def get_array_diffscore(C, diff_a, diff_b, diff_groupby,
     D = pd.DataFrame(dict(
         a=diff_a, b=diff_b, v=C,
         bin=list(bins)))
+
+    #print(D)
 
     arr = agg_func(D).sort_index()
     return D, arr
@@ -134,7 +137,7 @@ def find_borders(row, q, direction):
         return 2
 
 
-def get_array_score(C, agg_func,
+def get_array_score(C, agg_func, subset=None,
                     **hbargs):
     """
     Prepare the array for score calculation
@@ -144,65 +147,79 @@ def get_array_score(C, agg_func,
 
     D = pd.DataFrame(dict(
         v=C, bin=bins))
-    arr = agg_func(D).sort_index()
-    return D, arr
 
-
-def get_hexbin_diffcount(ax, obs, diff_a, diff_b, diff_groupby,
-                         diff_score,
-                         **hbargs):
-
-    sel_a = pd.Series(0, index=obs.index)
-    sel_b = pd.Series(0, index=obs.index)
-
-    sel_a.loc[obs.query(diff_a).index] = 1
-
-    if diff_b is not None:
-        sel_b.loc[obs.query(diff_b).index] = 1
-        assert (sel_a & sel_b).sum() == 0
+    if subset is None:
+        D['subset'] = True
     else:
-        sel_b.loc[sel_a[sel_a != 0b01].index] = 1
+        D['subset'] = subset
+
+    agg = agg_func(D)
+
+    #print(agg.head())
+    #print("D", len(D), "agg", len(agg))
+
+    #print('cc')
+    #print(D.head())
+    #print(arr)
+
+    return D, agg
 
 
-    hb_diff_a = ax.hexbin(
-        C=sel_a, reduce_C_function=np.sum,
-        visible=False, **hbargs)
-    hb = hb_diff_b = ax.hexbin(
-        C=sel_b, reduce_C_function=np.sum,
-        visible=True, **hbargs)
+# def get_hexbin_diffcount(ax, obs, diff_a, diff_b, diff_groupby,
+#                          diff_score,
+#                          **hbargs):
 
-    arr_a = pd.Series(hb_diff_a.get_array())
-    arr_b = pd.Series(hb_diff_b.get_array())
+#     sel_a = pd.Series(0, index=obs.index)
+#     sel_b = pd.Series(0, index=obs.index)
 
-    D = pd.DataFrame(dict(a=arr_a, b=arr_b)).fillna(0).astype(int)
-    sum_a, sum_b = D.sum()
-    allfrac = sum_a / (sum_a + sum_b)
+#     sel_a.loc[obs.query(diff_a).index] = 1
 
-    def bt(row):
-        if row.sum() == 0:
-            return 1.
-        rv = binomtest(row[0], row.sum(), p=allfrac)
-        return rv.pvalue
+#     if diff_b is not None:
+#         sel_b.loc[obs.query(diff_b).index] = 1
+#         assert (sel_a & sel_b).sum() == 0
+#     else:
+#         sel_b.loc[sel_a[sel_a != 0b01].index] = 1
 
-    lor = np.log2(  ((D['a'] / D.sum(1)) / allfrac ))
-    lor = lor.fillna(0)
-    lor = lor.replace([np.inf, -np.inf], 0)
 
-    if diff_score == 'slp':
-        pvals = D.apply(bt, axis=1)
-        D['lor'] = lor
-        D['pval'] = pvals
-        D['padj'] = multipletests(pvals, method='fdr_bh')[1]
+#     hb_diff_a = ax.hexbin(
+#         C=sel_a, reduce_C_function=np.sum,
+#         visible=False, **hbargs)
+#     hb = hb_diff_b = ax.hexbin(
+#         C=sel_b, reduce_C_function=np.sum,
+#         visible=True, **hbargs)
 
-        D['slp'] = -1 * np.log10(D['padj']) * np.sign(D['lor'])
+#     arr_a = pd.Series(hb_diff_a.get_array())
+#     arr_b = pd.Series(hb_diff_b.get_array())
 
-        D.loc[D['padj']>0.05, 'slp'] = 0
+#     D = pd.DataFrame(dict(a=arr_a, b=arr_b)).fillna(0).astype(int)
+#     sum_a, sum_b = D.sum()
+#     allfrac = sum_a / (sum_a + sum_b)
 
-        hb.set(array=D['slp'])
-    else:
-        hb.set(array=lor)
+#     def bt(row):
+#         if row.sum() == 0:
+#             return 1.
+#         rv = binomtest(row[0], row.sum(), p=allfrac)
+#         return rv.pvalue
 
-    return hb
+#     lor = np.log2(  ((D['a'] / D.sum(1)) / allfrac ))
+#     lor = lor.fillna(0)
+#     lor = lor.replace([np.inf, -np.inf], 0)
+
+#     if diff_score == 'slp':
+#         pvals = D.apply(bt, axis=1)
+#         D['lor'] = lor
+#         D['pval'] = pvals
+#         D['padj'] = multipletests(pvals, method='fdr_bh')[1]
+
+#         D['slp'] = -1 * np.log10(D['padj']) * np.sign(D['lor'])
+
+#         D.loc[D['padj']>0.05, 'slp'] = 0
+
+#         hb.set(array=D['slp'])
+#     else:
+#         hb.set(array=lor)
+
+#     return hb
 
 
 def get_hexbin_categorical(ax, C, generate_OR=False, **hbargs):
@@ -234,10 +251,17 @@ def get_hexbin_categorical(ax, C, generate_OR=False, **hbargs):
 
 
 def agg_generic(D, aggfunc=np.mean):
+
+    #filter out subset
+    DD = D.copy()
+    DD.loc[~DD['subset'], 'v'] = np.nan
     agg = pd.DataFrame(dict(
-        score = D.groupby('bin')['v'].agg(aggfunc),
-        count = D.groupby('bin')['v'].count()
+        score = DD.groupby('bin')['v'].agg(aggfunc),
+        count = DD.groupby('bin')['v'].count()
         ))
+    agg['score'] = agg['score'].fillna(agg['score'].min())
+
+    agg = agg.sort_index()
     return agg
 
 
@@ -255,6 +279,7 @@ def agg_diff_lfc(D, norm=False, aggfunc=np.mean):
         cnt_b = D[D['b']].groupby('bin')['v'].count(),
     ))
 
+
     agg['cnt_a'] = agg['cnt_a'].fillna(0).astype(int)
     agg['cnt_b'] = agg['cnt_b'].fillna(0).astype(int)
     agg['count'] = np.minimum(agg['cnt_a'], agg['cnt_b'])
@@ -263,6 +288,45 @@ def agg_diff_lfc(D, norm=False, aggfunc=np.mean):
         .replace([-np.inf, np.inf], 0)\
         .fillna(0)
 
+    #print(agg)
+
+    return agg
+
+
+def agg_diff_delta(D, norm=False, aggfunc=np.mean):
+    "Take LFC of normalized means per bin."
+
+    if norm:
+        D.loc[D.a, 'v'] = D.loc[D.a, 'v'] / D.loc[D.a, 'v'].mean()
+        D.loc[D.b, 'v'] = D.loc[D.b, 'v'] / D.loc[D.b, 'v'].mean()
+
+    D['v1'] = D['v'].copy()
+    D['v2'] = D['v'].copy()
+    D.loc[~D['a'], 'v1'] = np.nan
+    D.loc[~D['b'], 'v2'] = np.nan
+    D['n1'] = ~D['v1'].isna()
+    D['n2'] = ~D['v2'].isna()
+
+    # print(D)
+
+    DG = D.groupby('bin')
+    agg = pd.DataFrame(dict(
+        a = DG['v1'].agg(aggfunc),
+        b = DG['v2'].agg(aggfunc),
+        cnt_a = DG['n1'].sum(),
+        cnt_b = DG['n2'].sum(),
+    ))
+
+
+    agg['cnt_a'] = agg['cnt_a'].fillna(0).astype(int)
+    agg['cnt_b'] = agg['cnt_b'].fillna(0).astype(int)
+    agg['count'] = np.minimum(agg['cnt_a'], agg['cnt_b'])
+
+    agg['score'] = (agg['a'] - agg['b'])\
+        .fillna(0)
+
+    agg = agg.sort_index()
+    # print("D", len(D), "agg", len(agg))
     return agg
 
 
@@ -303,7 +367,6 @@ def agg_diff_mwu(D, norm=True):
     agg['slp'] = -np.log10(agg['pval']) * np.sign(agg['lfc'])
     agg.loc[agg['padj'] > 0.05, 'slp'] = 0
     agg['score'] = agg['slp']
-    #print(agg)
     return agg
 
 
@@ -316,7 +379,8 @@ def hexbinplot(adata,
                tfs=7,
                cmap='YlGnBu',
                vmin=None, vmax=None,
-               vzerosym=True,
+               vzerosym=False,
+               vzerosqueeze=1,
                edgenrm=0.1,
                legend=True,
                legend_fontsize=7,
@@ -332,6 +396,10 @@ def hexbinplot(adata,
                marker_color='white',
                marker_lw=4,
                marker_outline=True,
+
+               # subset the values to be aggregated.
+               subset=None,
+               mincnt=5,  #less than this number of obs -> transparent
 
                diff_a=None,
                diff_b=None,
@@ -352,7 +420,7 @@ def hexbinplot(adata,
     y = adata.obsm[use_rep][:,1]
 
     # To be implemented
-    assert diff_groupby is None
+    # assert diff_groupby is None
 
 
     if ax is None:
@@ -364,17 +432,26 @@ def hexbinplot(adata,
 
     # check for a categorical column
     modus = 'score'
+
     diff = False
 
     if diff_a is not None:
+        if subset is not None:
+            print("can not subset when doing a diff")
+            return
         diff = True
 
     if col == 'count':
+        if subset is not None:
+            print("not implemented subsetting bin counts")
+            return
         modus = 'count'
 
     elif str(adata.obs[col].dtype) == 'category':
         assert diff is False  ## not allowed
+        assert subset is None ## also not
         modus = 'cat'
+
 
     if marker is not None:
         fig = ax.figure
@@ -393,23 +470,24 @@ def hexbinplot(adata,
     # determine how to aggregate
     if agg_func is None:
         if diff:
-            agg_func = agg_diff_lfc
+            # pass
+            agg_func = agg_diff_delta
         elif modus == 'count':
             agg_func = partial(agg_generic, aggfunc=np.sum)
         else:
             agg_func = partial(agg_generic, aggfunc=np.mean)
 
+    #print(agg_func)
     if diff:
         aggargs = dict(diff_a=diff_a,
                        diff_b=diff_b,
                        diff_groupby=diff_groupby,
                        agg_func=agg_func)
     else:
-        aggargs = dict(agg_func=agg_func)
+        aggargs = dict(agg_func=agg_func, subset=subset)
 
     if modus == 'cat':
         hb = get_hexbin_categorical(ax, adata.obs[col], **hbargs)
-
 
     elif modus == 'score':
         hb = ax.hexbin(C=adata.obs[col], **hbargs)
@@ -419,7 +497,26 @@ def hexbinplot(adata,
         else:
             _raw, aggdata = get_array_score(
                 adata.obs[col], **hbargs, **aggargs)
-        hb.set(array=aggdata['score'])
+
+        if vmin is None and vmax is None:
+            # calculate un-selected
+            # this is to make plots comparable between
+            # different 'selects'
+            if not diff and subset is not None:
+                _, aggdata2 = get_array_score(
+                    adata.obs[col], agg_func=agg_func, **hbargs)
+                vmin = aggdata2['score'].min()
+                vmax = aggdata2['score'].max()
+
+            else:
+                # there was no subset
+                vmin = aggdata['score'].min()
+                vmax = aggdata['score'].max()
+
+        #print(aggdata.head())
+        alpha=((aggdata['count'] >= mincnt).astype(int) * 3 + 1) / 4
+        # print(alpha)
+        hb.set(array=aggdata['score'], alpha=alpha)
 
     elif modus == 'count':
         if not diff:
@@ -443,9 +540,12 @@ def hexbinplot(adata,
             if vmax is None:
                 vmax = np.quantile(varray, 1-nrm)
 
-            #if vzerosym and vmin <= 0 and vmax >= 0:
-            #    vext = max(abs(vmin), vmax)
-            #    vmin, vmax = -vext, vext
+        if vzerosym and vmin <= 0 and vmax >= 0:
+            vext = max(abs(vmin), vmax)
+            vmin, vmax = -vext, vext
+            if vzerosqueeze:
+                vmin *= vzerosqueeze
+                vmax *= vzerosqueeze
 
 
     hb.set_norm(mpl.colors.Normalize(vmin=vmin, vmax=vmax))
@@ -525,14 +625,18 @@ def hexbinplot(adata,
 
     if legend and modus != 'cat':
         cnorm=hb.norm
-        legend_elements = [
-            Patch(facecolor=cmap_(cnorm(vmin)), edgecolor='k',
-                  linewidth=0.3, label=f"{vmin:.1f}"),
-            Patch(facecolor=cmap_(cnorm(vmax)), edgecolor='k',
-                  linewidth=0.3, label=f"{vmax:.1f}"), ]
+        no_elements = 2
+        legendpoints = \
+            list(reversed(
+                [ vmin + ((vmax - vmin) / (no_elements-1) * i)
+                  for i in range(no_elements)]))
+        lem2 = [
+            Patch(facecolor=cmap_(cnorm(i)), edgecolor='k', linewidth=0.3,
+                  label=f"{i:.1g}")
+            for i in legendpoints]
 
-        legend = ax.legend(handles=legend_elements, loc='lower left',
-                           handlelength=0.9,
+        legend = ax.legend(handles=lem2, loc='lower left',
+                           handlelength=0.9, labelspacing = 0.8,
                            fontsize=legend_fontsize, frameon=False)
 
         for handle in legend.legendHandles:
