@@ -110,7 +110,6 @@ def get_array_diffscore(C, diff_a, diff_b, diff_groupby,
         a=diff_a, b=diff_b, v=C,
         bin=list(bins)))
 
-    #print(D)
 
     arr = agg_func(D).sort_index()
     return D, arr
@@ -296,6 +295,10 @@ def agg_diff_lfc(D, norm=False, aggfunc=np.mean):
 def agg_diff_delta(D, norm=False, aggfunc=np.mean):
     "Take LFC of normalized means per bin."
 
+    from scipy.stats import mannwhitneyu
+    from statsmodels.stats.multitest import multipletests
+
+
     if norm:
         D.loc[D.a, 'v'] = D.loc[D.a, 'v'] / D.loc[D.a, 'v'].mean()
         D.loc[D.b, 'v'] = D.loc[D.b, 'v'] / D.loc[D.b, 'v'].mean()
@@ -307,26 +310,51 @@ def agg_diff_delta(D, norm=False, aggfunc=np.mean):
     D['n1'] = ~D['v1'].isna()
     D['n2'] = ~D['v2'].isna()
 
-    # print(D)
 
-    DG = D.groupby('bin')
-    agg = pd.DataFrame(dict(
-        a = DG['v1'].agg(aggfunc),
-        b = DG['v2'].agg(aggfunc),
-        cnt_a = DG['n1'].sum(),
-        cnt_b = DG['n2'].sum(),
-    ))
+    mwu_bin = {}
 
+    for binname, group in D.groupby('bin'):
+        n1, n2 = group['n1'].sum(), group['n2'].sum()
+        if min(n1, n2) < 5:
+            mwu_bin[binname] = dict(pvalue=1, stat=0, a=0, b=0. )
+            continue
+        v1, v2 = group['v1'].dropna(), group['v2'].dropna()
+        x = mannwhitneyu(v1, v2)
+        mwu_bin[binname] = dict(
+            pvalue=x.pvalue, stat=x.statistic,
+            a = aggfunc(v1), b=aggfunc(v2),
+            cnt_a = n1, cnt_b = n2,
+        )
+
+    agg = pd.DataFrame(mwu_bin).T
+    agg.index.name = 'bin'
+    agg['score'] = (agg['a'] - agg['b']).fillna(0)
+
+    agg['padj'] = multipletests(agg['pvalue'], method='fdr_bh')[1]
+    agg['slp'] = -np.log10(agg['pvalue']) * np.sign(agg['score']) * (agg['padj'] < 0.05)
+    agg = agg.sort_index()
+
+    # #DG = D.groupby('bin')
+    # #agg = pd.DataFrame(dict(
+    # #    a = DG['v1'].agg(aggfunc),
+    # #    b = DG['v2'].agg(aggfunc),
+    # #    cnt_a = DG['n1'].sum(),
+    # #    cnt_b = DG['n2'].sum(),
+    # #))
+
+    # print(agg)
 
     agg['cnt_a'] = agg['cnt_a'].fillna(0).astype(int)
     agg['cnt_b'] = agg['cnt_b'].fillna(0).astype(int)
     agg['count'] = np.minimum(agg['cnt_a'], agg['cnt_b'])
 
-    agg['score'] = (agg['a'] - agg['b'])\
-        .fillna(0)
+    #3agg['score'] = (agg['a'] - agg['b'])\
+    #    .fillna(0)
 
     agg = agg.sort_index()
+    agg.to_pickle('/tmp/tmpmf')
     # print("D", len(D), "agg", len(agg))
+    #print( agg)
     return agg
 
 
@@ -472,8 +500,10 @@ def hexbinplot(adata,
     # determine how to aggregate
     if agg_func is None:
         if diff:
-            # pass
-            agg_func = agg_diff_delta
+            if modus == 'count':
+                agg_func = partial(agg_diff_delta, aggfunc=np.sum)
+            else:
+                agg_func = agg_diff_delta
         elif modus == 'count':
             agg_func = partial(agg_generic, aggfunc=np.sum)
         else:
@@ -515,10 +545,12 @@ def hexbinplot(adata,
                 vmin = aggdata['score'].min()
                 vmax = aggdata['score'].max()
 
-        #print(aggdata.head())
-        alpha=((aggdata['count'] >= mincnt).astype(int) * 3 + 1) / 4
+        print(aggdata.head())
+        #print(aggdata)
+        #alpha=((aggdata['count'] >= mincnt).astype(int) * 3 + 1) / 4
+        alpha=((aggdata['slp'] != 0).astype(int) * 3 + 1) / 4
         # print(alpha)
-        hb.set(array=aggdata['score'], alpha=alpha)
+        hb.set(array=aggdata['slp'], alpha=alpha)
 
     elif modus == 'count':
         if not diff:
@@ -526,8 +558,12 @@ def hexbinplot(adata,
             hb = ax.hexbin(**hbargs)
             print("Mean no per bin", hb.get_array().mean())
         else:
-            hb = get_hexbin_diffcount(ax, adata.obs,
-                                      **hbargs, **diffargs)
+            o = adata.obs.copy()
+            o['_one'] = 1
+            _raw, aggdata = get_array_diffscore(
+                 o['_one'], **hbargs, **aggargs)
+             #hb = get_hexbin_diffcount(ax, adata.obs,
+             #                         **hbargs, **diffargs)
     else:
         raise NotImplementedError()
 
