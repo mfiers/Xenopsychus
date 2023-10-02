@@ -401,6 +401,8 @@ def hexbinplot(adata,
                subset=None,
                mincnt=5,  #less than this number of obs -> transparent
 
+               binscores=None,
+
                diff_a=None,
                diff_b=None,
                diff_groupby=None,
@@ -588,7 +590,16 @@ def hexbinplot(adata,
                     ax.plot(xx, yy, c=marker_color, zorder=10, lw=marker_lw,)
 
 
-    if modus == 'cat':
+    if binscores is not None:
+        hb.set(array=list(binscores))
+        varray = hb.get_array()
+        varray = (varray >= 5).astype(float)
+        varray *= 3
+        varray += 1
+        varray /= 4
+        hb.set(alpha=varray)
+
+    elif modus == 'cat':
         # ensure we properly call face colors for category modus
         # eg - prevent no normalization, ensure values are integers
         # otherwise it becomes difficult to call
@@ -603,7 +614,7 @@ def hexbinplot(adata,
         alphas *= 0.5
         alphas += 0.5
 
-        hb.set(array=None, facecolors=face_colors, alpha=alphas)
+        #hb.set(array=None, facecolors=face_colors, alpha=alphas)
 
 
 
@@ -621,27 +632,25 @@ def hexbinplot(adata,
         title = col
     ax.set_title(title, pad=title_pad, fontsize=tfs)
 
-
-
     if legend and modus != 'cat':
         cnorm=hb.norm
-        no_elements = 2
+        no_elements = 4
         legendpoints = \
             list(reversed(
                 [ vmin + ((vmax - vmin) / (no_elements-1) * i)
                   for i in range(no_elements)]))
         lem2 = [
             Patch(facecolor=cmap_(cnorm(i)), edgecolor='k', linewidth=0.3,
-                  label=f"{i:.1g}")
+                  label=f"{i:.1f}")
             for i in legendpoints]
 
         legend = ax.legend(handles=lem2, loc='lower left',
-                           handlelength=0.9, labelspacing = 0.8,
+                           handlelength=0.9, labelspacing = 0,
                            fontsize=legend_fontsize, frameon=False)
 
         for handle in legend.legendHandles:
-            handle.set_height(7)  # Adjust the height to make it square
-            handle.set_width(7)   # Adjust the width to make it square
+            handle.set_height(6)  # Adjust the height to make it square
+            handle.set_width(6)   # Adjust the width to make it square
 
     # turn ticks off, remove spines
     ax.get_xaxis().set_visible(False)
@@ -653,6 +662,7 @@ def hexbinplot(adata,
 
     # add per point bin ids
     hb.xeno_bin_ids = binbin(**hbargs)
+    #print(hb.get_array())
 
     return hb
 
