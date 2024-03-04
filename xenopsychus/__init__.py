@@ -6,17 +6,16 @@ it does not seem to be - but who cares...
 
 """
 
-from functools import partial
 import math
 import warnings
+from functools import partial
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
-from matplotlib.patches import Patch
-
 import numpy as np
 import pandas as pd
+from matplotlib.patches import Patch
 from scipy.stats import binomtest
 from statsmodels.stats.multitest import multipletests
 
@@ -245,7 +244,9 @@ def get_hexbin_categorical(ax, C, generate_OR=False, **hbargs):
     except:
         C = C.cat.codes
 
-    rf = _OR if generate_OR else _most_abundant
+    rf = _OR# if generate_OR else _most_abundant
+    #TODO - what happens here with the new matplotlib version?c
+    rf = _OR
     return ax.hexbin(C=C, reduce_C_function=rf, **hbargs)
 
 
@@ -406,7 +407,7 @@ def hexbinplot(adata,
                brd=0.005,
                tfs=7,
                cmap='YlGnBu',
-               vmin=None, vmax=None,
+               vmin=None, vmax=None, vperc=0.05,
                vzerosym=False,
                vzerosqueeze=1,
                edgenrm=0.1,
@@ -537,20 +538,24 @@ def hexbinplot(adata,
             if not diff and subset is not None:
                 _, aggdata2 = get_array_score(
                     adata.obs[col], agg_func=agg_func, **hbargs)
-                vmin = aggdata2['score'].min()
-                vmax = aggdata2['score'].max()
+                vmin = aggdata2['score'].quantile(vperc)
+                vmax = aggdata2['score'].quantile(1-vperc)
+                print(vmin, vmax)
 
             else:
                 # there was no subset
-                vmin = aggdata['score'].min()
-                vmax = aggdata['score'].max()
+                vmin = aggdata['score'].quantile(vperc)
+                vmax = aggdata['score'].quantile(1-vperc)
 
-        print(aggdata.head())
+        #print(aggdata.head())
         #print(aggdata)
         #alpha=((aggdata['count'] >= mincnt).astype(int) * 3 + 1) / 4
-        alpha=((aggdata['slp'] != 0).astype(int) * 3 + 1) / 4
-        # print(alpha)
-        hb.set(array=aggdata['slp'], alpha=alpha)
+        if 'slp' in aggdata:
+            alpha=((aggdata['slp'] != 0).astype(int) * 3 + 1) / 4
+            hb.set(array=aggdata['slp'], alpha=alpha)
+        else:
+            alpha=((aggdata['count'] > 20).astype(int) * 3 + 1) / 4
+            hb.set(array=aggdata['score'], alpha=alpha)
 
     elif modus == 'count':
         if not diff:
