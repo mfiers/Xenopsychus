@@ -6,6 +6,7 @@ it does not seem to be - but who cares...
 
 """
 
+import logging
 import math
 import warnings
 from functools import partial
@@ -19,6 +20,8 @@ from matplotlib.patches import Patch
 from scipy.stats import binomtest
 from statsmodels.stats.multitest import multipletests
 
+lg = logging.getLogger(__name__)
+lg.setLevel(logging.INFO)
 
 def binbin(x, y, gridsize, **xargs):
     """
@@ -198,7 +201,7 @@ def get_hexbin_categorical(ax, C, generate_OR=False, **hbargs):
     return ax.hexbin(C=C, reduce_C_function=rf, **hbargs)
 
 
-def agg_generic(D, aggfunc=np.mean):
+def agg_generic(D, aggfunc="mean"):
 
     #filter out subset
     DD = D.copy()
@@ -331,8 +334,10 @@ def agg_diff_mwu(D, norm=True):
     return agg
 
 
-def hexbinplot(adata,
-               col,
+def hexbinplot(col,
+               adata = None,
+               obsm = None,
+               obs = None,
                gridsize=16,
                ax=None,
                nrm=0.05,
@@ -377,9 +382,20 @@ def hexbinplot(adata,
         warnings.warn("Please use `lw=` instead of `linewidths`")
         lw = linewidths
 
+    if adata is None:
+        assert obsm is not None
+        assert obs is not None
+    else:
+        if obsm is not None:
+            lg.warning("Ignoring obsm")
+        if obs is not None:
+            lg.warning("Ignoring obs")
 
-    x = adata.obsm[use_rep][:,0]
-    y = adata.obsm[use_rep][:,1]
+        obsm = adata.obsm
+        obs = adata.obs
+
+    x = obsm[use_rep][:,0]
+    y = obsm[use_rep][:,1]
 
     # To be implemented
     # assert diff_groupby is None
@@ -408,7 +424,7 @@ def hexbinplot(adata,
             return
         modus = 'count'
 
-    elif str(adata.obs[col].dtype) == 'category':
+    elif str(obs[col].dtype) == 'category':
         assert diff is False  ## not allowed
         assert subset is None ## also not
         modus = 'cat'
@@ -417,14 +433,14 @@ def hexbinplot(adata,
     if marker is not None:
         fig = ax.figure
         ax2 = fig.add_subplot(111)
-        hb_marker = get_hexbin_categorical(ax2, adata.obs[marker], **hbargs)
+        hb_marker = get_hexbin_categorical(ax2, obs[marker], **hbargs)
         fig.delaxes(ax2)
 
     if modus == 'cat':
         # calculate ORs for alpha's later onto
         fig = ax.figure
         ax2 = fig.add_subplot(111)
-        hb_cator = get_hexbin_categorical(ax2, adata.obs[col], generate_OR=True, **hbargs)
+        hb_cator = get_hexbin_categorical(ax2, obs[col], generate_OR=True, **hbargs)
         fig.delaxes(ax2)
 
 
@@ -450,16 +466,16 @@ def hexbinplot(adata,
 
 
     if modus == 'cat':
-        hb = get_hexbin_categorical(ax, adata.obs[col], **hbargs)
+        hb = get_hexbin_categorical(ax, obs[col], **hbargs)
 
     elif modus == 'score':
-        hb = ax.hexbin(C=adata.obs[col], **hbargs)
+        hb = ax.hexbin(C=obs[col], **hbargs)
         if diff:
             _raw, aggdata = get_array_diffscore(
-                adata.obs[col], **hbargs, **aggargs)
+                obs[col], **hbargs, **aggargs)
         else:
             _raw, aggdata = get_array_score(
-                adata.obs[col], **hbargs, **aggargs)
+                obs[col], **hbargs, **aggargs)
 
         if vmin is None and vmax is None:
             # calculate un-selected
@@ -467,7 +483,7 @@ def hexbinplot(adata,
             # different 'selects'
             if not diff and subset is not None:
                 _, aggdata2 = get_array_score(
-                    adata.obs[col], agg_func=agg_func, **hbargs)
+                    obs[col], agg_func=agg_func, **hbargs)
                 vmin = np.quantile(
                     aggdata2['score'], nrm)
                 vmax =  np.quantile(
@@ -507,7 +523,7 @@ def hexbinplot(adata,
             hb = ax.hexbin(**hbargs)
             print("Mean no per bin", hb.get_array().mean())
         else:
-            o = adata.obs.copy()
+            o = obs.copy()
             o['_one'] = 1
             _raw, aggdata = get_array_diffscore(
                  o['_one'], **hbargs, **aggargs)
@@ -648,7 +664,7 @@ def hexbinplot(adata,
     ax.spines['bottom'].set_visible(False)
 
     # add per point bin ids & aggregation data per hexin
-    hexbin_ids =  pd.Series(binbin(**hbargs), index=adata.obs_names)
+    hexbin_ids =  pd.Series(binbin(**hbargs), index=obs.index)
     hb.hexbin_ids = hexbin_ids
     hb.aggdata = aggdata
 
