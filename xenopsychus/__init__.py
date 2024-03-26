@@ -9,6 +9,8 @@ it does not seem to be - but who cares...
 import logging
 import math
 import warnings
+from copy import copy
+from dataclasses import dataclass
 from functools import partial
 
 import matplotlib as mpl
@@ -17,11 +19,263 @@ import matplotlib.transforms as mtransforms
 import numpy as np
 import pandas as pd
 from matplotlib.patches import Patch
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.stats import binomtest
 from statsmodels.stats.multitest import multipletests
 
 lg = logging.getLogger(__name__)
 lg.setLevel(logging.INFO)
+
+FAIL = '@4@3@FAIL@1@2@FAIL@5@6@'
+
+def getrm(kwargs, key, default=None):
+    rv = None
+    if key in kwargs:
+        rv = kwargs[key]
+        del kwargs[key]
+    if rv is None:
+        return default
+
+class Xenopsychus:
+
+    def __init__(self, data, x_name, y_name,
+                 figsize=(5, 4), dpi=120,
+                 colorbar=True,  cmap_cat='Set2',
+                 mincnt=5, palette=None,
+                 failcolor='lightgrey',
+                 **plotargs):
+
+        # core -
+        self.data = data
+        self.y_name = y_name
+        self.x_name = x_name
+
+        # plotting
+        self.figsize = figsize
+        self.dpi = dpi
+
+        # categorical colors
+        self.cmap_cat = cmap_cat
+        self.palette = palette
+
+        # filter min counts
+        self.mincnt = mincnt
+        if isinstance(failcolor, str):
+            self.failcolor = mpl.colors.to_rgba(failcolor)
+        else:
+            self.failcolor = failcolor
+
+        # arguments for hexbin
+        self.plotargs = plotargs
+
+        # add a colorbar?
+        self.colorbar = colorbar
+
+        # set a few defaults for hexbin
+        # can be overridden by anything in the
+        # __init___ call.
+        for k, v in dict(mincnt=1,
+                         linewidths=0.5,
+                         gridsize=16,
+                         edgecolors='black',
+                         cmap='YlGnBu').items():
+            self.plotargs[k] = self.plotargs.get(k, v)
+
+        # pull x, y vectors from self.data
+        self.plotargs['x'] = self.data[self.x_name]
+        self.plotargs['y'] = self.data[self.y_name]
+
+        # first step - calculate hexin IDs for every cell
+        self.data['_hb'] = binbin(x=self.plotargs['x'],
+                                  y=self.plotargs['y'],
+                                  gridsize=self.plotargs['gridsize'],)
+
+    #
+    # Decorators!
+    #
+
+    def ensure_ax(method):
+        def decorator(self, *args, **kwargs ):
+            ax = None
+            if 'ax' in kwargs:
+                ax = kwargs['ax']
+                del kwargs['ax']
+
+            if ax is None:
+                self.fig = plt.figure(figsize=self.figsize,
+                                        dpi=self.dpi)
+                self.ax = self.fig.gca()
+            else:
+                self.ax = ax
+                self.fig = self.ax.figure
+
+            method(self, *args, **kwargs)
+        return decorator
+
+    def clean_spines(method):
+        def decorator(self, *args, **kwargs ):
+            rv = method(self, *args, **kwargs)
+            ax = self.ax
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)
+            ax.spines['right'].set_visible(False)
+            ax.spines['top'].set_visible(False)
+            ax.spines['left'].set_visible(False)
+            ax.spines['bottom'].set_visible(False)
+        return decorator
+
+
+    def fix_colorbar(method):
+        def decorator(self, *args, **kwargs ):
+            if 'colorbar' in kwargs:
+                colorbar = kwargs.pop('colorbar')
+            else:
+                colorbar = self.colorbar
+
+            rv = method(self, *args, **kwargs)
+            if colorbar:
+                ax = self.ax
+                divider = make_axes_locatable(ax)
+                self.cax = divider.append_axes('right', size='5%', pad=0.05)
+                self.fig.colorbar(self.hb, cax=self.cax,
+                                orientation='vertical')
+        return decorator
+
+
+    def mincnt(method):
+        """
+        Filter the hexbin to remove all cells with < self.mincnt
+        spots in there.
+        """
+        def decorator(self, *args, **kwargs ):
+            self.mincnt = kwargs.pop('mincnt', self.mincnt)
+            if self.mincnt > 0:
+                method(self, *args, **kwargs)
+                #need to draw the thing first - to calculate colors
+                self.ax.figure.canvas.draw()
+                facecolors = self.hb.get_facecolors()
+                cellcnt = self.data['_hb'].value_counts().sort_index()
+                for i, cnt in enumerate(cellcnt):
+                    if cnt <= self.mincnt:
+                        facecolors[i] = self.failcolor
+                self.hb.set(array=None, facecolors=facecolors)
+        return decorator
+
+    def fixargs(method):
+        def decorator(self, *args, **kwargs):
+            self.plotargs.update(kwargs)
+            return method(self, *args, **kwargs)
+        return decorator
+
+    #
+    # Helper functions
+    #
+
+    def find_categories(self, C,
+                        fracdiff=0.1):
+
+        def count_most(r):
+            """
+            Return the most abundant category
+
+            Args:
+                r (pd.Series): observations in this cell
+
+            Returns:
+                ANY: most abundant value
+            """
+            vc = r.value_counts()
+            mx = vc.iloc[0]
+            sum = vc.sum()
+            ml = vc.index[0]
+            if len(vc) == 1:
+                return ml
+            else:
+                m2 = vc.iloc[1]
+                if ((mx - m2) / sum) <= fracdiff:
+                    return FAIL
+                else:
+                    return ml
+
+        return self.data.groupby('_hb')[C].agg(count_most).sort_index()
+
+    #
+    # Plotting functions
+    #
+
+    @fix_colorbar
+    @clean_spines
+    @ensure_ax
+    def plot_agg(self, agg, **kwargs):
+        self.plotargs.update(kwargs)
+        # dummy plot
+        self.hb = self.ax.hexbin(**self.plotargs,)
+        agg = agg.sort_index()
+        self.hb.set(array=agg.values)
+        if kwargs.get('vmin') is None:
+            kwargs['vmin'] = agg.quantile(0.025)
+        if kwargs.get('vmax') is None:
+            kwargs['vmax'] = agg.quantile(0.975)
+        self.hb.set_norm(
+            mpl.colors.Normalize(
+                vmin=kwargs['vmin'], vmax=kwargs['vmax']))
+
+    @fix_colorbar
+    @clean_spines
+    @ensure_ax
+    def plot_num(self, C, ax=None, **kwargs):
+        self.plotargs.update(kwargs)
+        self.hb = self.ax.hexbin(
+            C=self.data[C],
+            **self.plotargs)
+
+    @clean_spines
+    @ensure_ax
+    def plot_cat(self, C,
+                 palette=None,
+                 fracdiff=0.1,
+                 failcolor = "lightgrey",
+                 **kwargs):
+        """
+        Plot categorical hexbin
+
+        Args:
+            C (str): Column in .data to plot
+            paletted (dict): field to color map
+            fracdiff (float): min fraction difference
+            mincnt (int): min no points to assign
+            failcol (str or (r,g,b)): color in case of unclear assignment
+
+        Returns:
+            hexbin
+        """
+        if palette is None:
+            if self.palette is None:
+                allcats = sorted(self.data[C].unique())
+                cmap = plt.colormaps.get(self.cmap_cat)
+                palette = {x:  cmap(i)
+                        for (i, x) in enumerate(allcats)}
+            else:
+                palette = self.palette
+
+        #ensure we can fail - add failcolor
+        palette[FAIL] = failcol
+        self.plotargs.update(kwargs)
+        self.hb = self.ax.hexbin(**self.plotargs)
+
+        agg = self.find_categories(C, fracdiff=fracdiff)
+        facecolors = [palette[x] for x in agg.sort_index().values]
+        self.hb.set(array=None, facecolors=facecolors)
+
+
+    @mincnt
+    @fix_colorbar
+    @clean_spines
+    @ensure_ax
+    def plot_count(self, **kwargs):
+        self.plotargs.update(kwargs)
+        self.hb = self.ax.hexbin(**self.plotargs)
+
 
 def binbin(x, y, gridsize, **xargs):
     """
