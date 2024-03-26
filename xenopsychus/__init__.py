@@ -433,6 +433,8 @@ def get_hexbin_categorical(ax, C, generate_OR=False, **hbargs):
 
         # find frequency of each value
         vc = pd.Series(values).value_counts()
+        if len(vc) == 0:
+            return None
         return vc.index[0]
 
 
@@ -451,7 +453,9 @@ def get_hexbin_categorical(ax, C, generate_OR=False, **hbargs):
         C = C.cat.codes
 
     rf = _OR if generate_OR else _most_abundant
-
+    import streamlit as st
+    #st.write(hbargs)
+    #print(C)
     return ax.hexbin(C=C, reduce_C_function=rf, **hbargs)
 
 
@@ -708,7 +712,7 @@ def hexbinplot(col,
         elif modus == 'count':
             agg_func = partial(agg_generic, aggfunc=np.sum)
         else:
-            agg_func = partial(agg_generic, aggfunc=np.mean)
+            agg_func = partial(agg_generic, aggfunc="mean")
 
     if diff:
         aggargs = dict(diff_a=diff_a,
