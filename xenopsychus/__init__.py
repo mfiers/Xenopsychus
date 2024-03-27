@@ -155,6 +155,26 @@ def cluster_marker_lines(method):
 
         method(self, *args, **kwargs)
 
+        def find_borders(row, q, direction):
+            dx, dy = dict(
+                left=(0, -2),
+                topleft = (1, -1),
+                topright = (1, 1),
+                right=(0, 2),
+                bottomleft = (-1, -1),
+                bottomright = (-1, 1),
+            )[direction]
+
+            x = row['r1'] + dx
+            y = row['r0'] + dy
+            oc = q[(q.r1 == x) & (q.r0 == y)]
+            if len(oc) == 0:
+                return 1
+            elif oc.iloc[0]['array'] == row['array']:
+                return 0
+            else:
+                return 2
+
         if cluster_show is not None:
             cats = self.find_categories(self.data, cluster_show)
             valldata = pd.DataFrame(self.hb.get_offsets())
@@ -527,25 +547,6 @@ def binbin(x, y, gridsize, **xargs):
 #     return D, arr
 
 
-# def find_borders(row, q, direction):
-#     dx, dy = dict(
-#         left=(0, -2),
-#         topleft = (1, -1),
-#         topright = (1, 1),
-#         right=(0, 2),
-#         bottomleft = (-1, -1),
-#         bottomright = (-1, 1),
-#     )[direction]
-
-#     x = row['r1'] + dx
-#     y = row['r0'] + dy
-#     oc = q[(q.r1 == x) & (q.r0 == y)]
-#     if len(oc) == 0:
-#         return 1
-#     elif oc.iloc[0]['array'] == row['array']:
-#         return 0
-#     else:
-#         return 2
 
 
 # def get_array_score(C, agg_func, subset=None,
