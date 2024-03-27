@@ -26,7 +26,9 @@ from statsmodels.stats.multitest import multipletests
 lg = logging.getLogger(__name__)
 lg.setLevel(logging.INFO)
 
-FAIL = '@4@3@FAIL@1@2@FAIL@5@6@'
+MINCNT_FAIL = 'MINCNT@!' * 4
+SUBSET_FAIL = 'SUBSETT@!' * 4
+CAT_FAIL = 'CATCAT@!' * 4
 
 def getrm(kwargs, key, default=None):
     rv = None
@@ -36,13 +38,180 @@ def getrm(kwargs, key, default=None):
     if rv is None:
         return default
 
+
+#
+# Decorators!
+#
+
+def mincnt(method):
+    """
+    Filter the hexbin to remove all cells with < self.mincnt
+    spots in there.
+    """
+    def decorator(self, *args, **kwargs ):
+        mincnt = kwargs.pop('mincnt', self.mincnt)
+        mincnt_fail_color = kwargs.pop('mincnt_fail_color', self.mincnt_fail_color)
+
+        method(self, *args, **kwargs)
+        if self.mincnt > 0:
+            #need to draw the thing first - to calculate colors
+            self.ax.figure.canvas.draw()
+            facecolors = self.hb.get_facecolors()
+            cellcnt = (self.data_subset['_hb']
+                            .value_counts()
+                            .reindex(self.data['_hb'].unique())
+                            .fillna(0)
+                            .sort_index())
+            for i, cnt in enumerate(cellcnt):
+                if cnt <= mincnt:
+                    facecolors[i] = self.ensure_rgba(mincnt_fail_color)
+            self.hb.set(array=None, facecolors=facecolors)
+    return decorator
+
+def add_colorbar(method):
+    def decorator(self, *args, **kwargs ):
+        colorbar = kwargs.pop('colorbar', self.colorbar)
+
+        rv = method(self, *args, **kwargs)
+        if colorbar:
+            ax = self.ax
+            divider = make_axes_locatable(ax)
+            self.cax = divider.append_axes('right', size='5%', pad=0.05)
+            self.fig.colorbar(self.hb, cax=self.cax,
+                            orientation='vertical')
+    return decorator
+
+def addborder(method):
+    def decorator(self, *args, **kwargs):
+        border_x = kwargs.pop('border_x', self.border_x)
+        border_y = kwargs.pop('border_y', self.border_y)
+        method(self, *args, **kwargs)
+        xmin, xmax = self.ax.get_xlim()
+        ymin, ymax = self.ax.get_ylim()
+        xd = border_x * (xmax-xmin)
+        yd = border_y * (ymax-ymin)
+        self.ax.set_xlim(xmin-xd, xmax+xd)
+        self.ax.set_ylim(ymin-yd, ymax+yd)
+    return decorator
+
+
+def ensure_ax(method):
+    def decorator(self, *args, **kwargs ):
+        ax = None
+        if 'ax' in kwargs:
+            ax = kwargs['ax']
+            del kwargs['ax']
+
+        if ax is None:
+            self.fig = plt.figure(figsize=self.figsize,
+                                    dpi=self.dpi)
+            self.ax = self.fig.gca()
+        else:
+            self.ax = ax
+            self.fig = self.ax.figure
+
+        method(self, *args, **kwargs)
+    return decorator
+
+def clean_spines(method):
+    def decorator(self, *args, **kwargs ):
+        rv = method(self, *args, **kwargs)
+        ax = self.ax
+        ax.get_xaxis().set_visible(False)
+        ax.get_yaxis().set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['top'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+    return decorator
+
+def subset(method):
+    def decorator(self, *args, **kwargs):
+        subset = kwargs.pop('subset', self.subset)
+        if subset is None:
+            self.data_subset = self.data
+        else:
+            self.data_subset = self.data[subset]
+        method(self, *args, **kwargs)
+    return decorator
+
+
+def nosubset(method):
+    def decorator(self, *args, **kwargs):
+        subset = kwargs.pop('subset', self.subset)
+        self.data_subset = self.data
+        if subset is not None:
+            print("Warning - cannot subset on plot_agg!")
+        method(self, *args, **kwargs)
+    return decorator
+
+def cluster_marker_lines(method):
+    def decorator(self, *args, **kwargs):
+        cluster_show = kwargs.pop('cluster_show', self.cluster_show)
+        cluster_linecolor = kwargs.pop('cluster_linecolor', self.cluster_linecolor)
+        cluster_outline = kwargs.pop('cluster_outline', self.cluster_outline)
+        cluster_linewidth = kwargs.pop('cluster_linewidth', self.cluster_linewidth)
+
+        method(self, *args, **kwargs)
+
+        if cluster_show is not None:
+            cats = self.find_categories(self.data, cluster_show)
+            valldata = pd.DataFrame(self.hb.get_offsets())
+            valldata['array'] = list(cats)
+            valldata['r0'] = valldata[0].rank(method='dense').astype(int)
+            valldata['r1'] = valldata[1].rank(method='dense').astype(int)
+
+            vertices = self.hb.get_paths()[0].vertices
+            dirsel = [('right', slice(0,2)),
+                    ('topright', slice(1,3)),
+                    ('topleft', slice(2,4)),
+                    ('left', slice(3,5)),
+                    ('bottomleft', slice(4,6)),
+                    ('bottomright', slice(5,7)),
+                    ]
+
+            rcutoff = 1 if cluster_outline else 2
+            for direction, vsel in dirsel:
+                borders = valldata.apply(find_borders, q=valldata, direction=direction, axis=1)
+                for i, (_, r) in enumerate(borders.items()):
+                    if r >= rcutoff:
+                        xx = vertices[vsel, 0] + valldata.iloc[i][0]
+                        yy = vertices[vsel, 1] + valldata.iloc[i][1]
+                        self.ax.plot(xx, yy, c=cluster_linecolor, zorder=10, lw=cluster_linewidth)
+
+
+    return decorator
+
+
+def supadec(method):
+    """
+    Combine a set of common decorators
+
+    Args:
+        method: a method of this object
+
+    Returns:
+        method: decorated methods
+    """
+    return cluster_marker_lines(mincnt(addborder(clean_spines(ensure_ax(method)))))
+
+
 class Xenopsychus:
 
     def __init__(self, data, x_name, y_name,
                  figsize=(5, 4), dpi=120,
                  colorbar=True,  cmap_cat='Set2',
                  mincnt=5, palette=None,
-                 failcolor='lightgrey',
+                 border_x = 0.,
+                 border_y = 0.,
+                 cluster_show = None,
+                 cluster_linecolor = 'black',
+                 cluster_outline = False,
+                 cluster_linewidth = 1.5,
+                 cat_fail_color='lightgrey',
+                 mincnt_fail_color='lightgrey',
+                 subset_fail_color='lightgrey',
+                 subset=None,
                  **plotargs):
 
         # core -
@@ -54,16 +223,24 @@ class Xenopsychus:
         self.figsize = figsize
         self.dpi = dpi
 
+        # draw cluster lines
+        self.cluster_show = cluster_show
+        self.cluster_linecolor = cluster_linecolor
+        self.cluster_outline = cluster_outline
+        self.cluster_linewidth = cluster_linewidth
+
+
         # categorical colors
         self.cmap_cat = cmap_cat
         self.palette = palette
+        self.cat_fail_color = cat_fail_color
+
+        self.border_x = border_x
+        self.border_y = border_y
 
         # filter min counts
         self.mincnt = mincnt
-        if isinstance(failcolor, str):
-            self.failcolor = mpl.colors.to_rgba(failcolor)
-        else:
-            self.failcolor = failcolor
+        self.mincnt_fail_color = mincnt_fail_color
 
         # arguments for hexbin
         self.plotargs = plotargs
@@ -71,11 +248,17 @@ class Xenopsychus:
         # add a colorbar?
         self.colorbar = colorbar
 
+        # subsetting data
+        # needs to be done carefully - we take the bin ids' from the full dataset.
+        # and then calculate a second 'data for the aggregation & counting
+        self.subset = subset
+        self.subset_fail_color = subset_fail_color
+
         # set a few defaults for hexbin
         # can be overridden by anything in the
         # __init___ call.
         for k, v in dict(mincnt=1,
-                         linewidths=0.5,
+                         linewidths=0.25,
                          gridsize=16,
                          edgecolors='black',
                          cmap='YlGnBu').items():
@@ -91,87 +274,33 @@ class Xenopsychus:
                                   gridsize=self.plotargs['gridsize'],)
 
     #
-    # Decorators!
-    #
-
-    def ensure_ax(method):
-        def decorator(self, *args, **kwargs ):
-            ax = None
-            if 'ax' in kwargs:
-                ax = kwargs['ax']
-                del kwargs['ax']
-
-            if ax is None:
-                self.fig = plt.figure(figsize=self.figsize,
-                                        dpi=self.dpi)
-                self.ax = self.fig.gca()
-            else:
-                self.ax = ax
-                self.fig = self.ax.figure
-
-            method(self, *args, **kwargs)
-        return decorator
-
-    def clean_spines(method):
-        def decorator(self, *args, **kwargs ):
-            rv = method(self, *args, **kwargs)
-            ax = self.ax
-            ax.get_xaxis().set_visible(False)
-            ax.get_yaxis().set_visible(False)
-            ax.spines['right'].set_visible(False)
-            ax.spines['top'].set_visible(False)
-            ax.spines['left'].set_visible(False)
-            ax.spines['bottom'].set_visible(False)
-        return decorator
-
-
-    def fix_colorbar(method):
-        def decorator(self, *args, **kwargs ):
-            if 'colorbar' in kwargs:
-                colorbar = kwargs.pop('colorbar')
-            else:
-                colorbar = self.colorbar
-
-            rv = method(self, *args, **kwargs)
-            if colorbar:
-                ax = self.ax
-                divider = make_axes_locatable(ax)
-                self.cax = divider.append_axes('right', size='5%', pad=0.05)
-                self.fig.colorbar(self.hb, cax=self.cax,
-                                orientation='vertical')
-        return decorator
-
-
-    def mincnt(method):
-        """
-        Filter the hexbin to remove all cells with < self.mincnt
-        spots in there.
-        """
-        def decorator(self, *args, **kwargs ):
-            self.mincnt = kwargs.pop('mincnt', self.mincnt)
-            if self.mincnt > 0:
-                method(self, *args, **kwargs)
-                #need to draw the thing first - to calculate colors
-                self.ax.figure.canvas.draw()
-                facecolors = self.hb.get_facecolors()
-                cellcnt = self.data['_hb'].value_counts().sort_index()
-                for i, cnt in enumerate(cellcnt):
-                    if cnt <= self.mincnt:
-                        facecolors[i] = self.failcolor
-                self.hb.set(array=None, facecolors=facecolors)
-        return decorator
-
-    def fixargs(method):
-        def decorator(self, *args, **kwargs):
-            self.plotargs.update(kwargs)
-            return method(self, *args, **kwargs)
-        return decorator
-
-    #
     # Helper functions
     #
 
-    def find_categories(self, C,
+    @classmethod
+    def ensure_rgba(cls, x):
+        if isinstance(x, str):
+            return mpl.colors.to_rgba(x)
+        x = tuple(x)
+        if len(x) == 3:
+            return (x[0], x[1], x[2], 1)
+        else:
+            return x
+
+    def apply_agg(self, agg, fillna=0, **kwargs):
+        agg = (agg.reindex(self.data['_hb'].unique())
+                .fillna(fillna)
+                .sort_index())
+        self.hb.set(array=agg.values)
+        if kwargs.get('vmin') is None:
+            kwargs['vmin'] = agg.quantile(0.025)
+        if kwargs.get('vmax') is None:
+            kwargs['vmax'] = agg.quantile(0.975)
+        self.hb.set_norm(
+                mpl.colors.Normalize(
+                    vmin=kwargs['vmin'], vmax=kwargs['vmax']))
+
+    def find_categories(self, data, C,
                         fracdiff=0.1):
 
         def count_most(r):
@@ -193,23 +322,28 @@ class Xenopsychus:
             else:
                 m2 = vc.iloc[1]
                 if ((mx - m2) / sum) <= fracdiff:
-                    return FAIL
+                    return CAT_FAIL
                 else:
                     return ml
 
-        return self.data.groupby('_hb')[C].agg(count_most).sort_index()
+        agg = data.groupby('_hb')[C].agg(count_most)
+        agg = agg.reindex(self.data['_hb'].unique()).fillna(SUBSET_FAIL).sort_index()
+        return agg
+
 
     #
     # Plotting functions
     #
 
-    @fix_colorbar
-    @clean_spines
-    @ensure_ax
+    @add_colorbar
+    @supadec
+    @nosubset
     def plot_agg(self, agg, **kwargs):
-        self.plotargs.update(kwargs)
+
+        pa = copy(self.plotargs)
+        pa.update(kwargs)
         # dummy plot
-        self.hb = self.ax.hexbin(**self.plotargs,)
+        self.hb = self.ax.hexbin(**pa)
         agg = agg.sort_index()
         self.hb.set(array=agg.values)
         if kwargs.get('vmin') is None:
@@ -220,21 +354,23 @@ class Xenopsychus:
             mpl.colors.Normalize(
                 vmin=kwargs['vmin'], vmax=kwargs['vmax']))
 
-    @fix_colorbar
-    @clean_spines
-    @ensure_ax
-    def plot_num(self, C, ax=None, **kwargs):
-        self.plotargs.update(kwargs)
-        self.hb = self.ax.hexbin(
-            C=self.data[C],
-            **self.plotargs)
 
-    @clean_spines
-    @ensure_ax
+    @add_colorbar
+    @supadec
+    @subset
+    def plot_num(self, C, ax=None, **kwargs):
+        pa = copy(self.plotargs)
+        pa.update(kwargs)
+        self.hb = self.ax.hexbin(**pa)
+
+        agg = self.data_subset.groupby('_hb')[C].mean()
+        self.apply_agg(agg, **pa)
+
+    @supadec
+    @subset
     def plot_cat(self, C,
                  palette=None,
                  fracdiff=0.1,
-                 failcolor = "lightgrey",
                  **kwargs):
         """
         Plot categorical hexbin
@@ -249,6 +385,14 @@ class Xenopsychus:
         Returns:
             hexbin
         """
+
+        subset_fail_color = kwargs.pop('subset_fail_color', self.subset_fail_color)
+        cat_fail_color = kwargs.pop('cat_fail_color', self.cat_fail_color)
+        mincnt_fail_color = kwargs.pop('mincnt_fail_color', self.mincnt_fail_color)
+
+        pa = copy(self.plotargs)
+        pa.update(kwargs)
+
         if palette is None:
             if self.palette is None:
                 allcats = sorted(self.data[C].unique())
@@ -258,23 +402,29 @@ class Xenopsychus:
             else:
                 palette = self.palette
 
-        #ensure we can fail - add failcolor
-        palette[FAIL] = failcol
-        self.plotargs.update(kwargs)
-        self.hb = self.ax.hexbin(**self.plotargs)
+        #ensure we can fail - add cat_fail_color
+        palette[CAT_FAIL] = cat_fail_color
+        palette[MINCNT_FAIL] = mincnt_fail_color
+        palette[SUBSET_FAIL] = subset_fail_color
 
-        agg = self.find_categories(C, fracdiff=fracdiff)
+        self.hb = self.ax.hexbin(**pa)
+
+        agg = self.find_categories(C=C, data=self.data_subset, fracdiff=fracdiff)
         facecolors = [palette[x] for x in agg.sort_index().values]
         self.hb.set(array=None, facecolors=facecolors)
 
 
-    @mincnt
-    @fix_colorbar
-    @clean_spines
-    @ensure_ax
+    @add_colorbar
+    @supadec
+    @subset
     def plot_count(self, **kwargs):
-        self.plotargs.update(kwargs)
-        self.hb = self.ax.hexbin(**self.plotargs)
+        # do a regular one to have a hexbin
+        pa = copy(self.plotargs)
+        pa.update(kwargs)
+        self.hb = self.ax.hexbin(**pa)
+        # calculate baed on data_subset
+        agg = self.data_subset['_hb'].value_counts()
+        self.apply_agg(agg, fillna=0, **pa)
 
 
 def binbin(x, y, gridsize, **xargs):
@@ -454,6 +604,7 @@ def get_hexbin_categorical(ax, C, generate_OR=False, **hbargs):
 
     rf = _OR if generate_OR else _most_abundant
     import streamlit as st
+
     #st.write(hbargs)
     #print(C)
     return ax.hexbin(C=C, reduce_C_function=rf, **hbargs)
