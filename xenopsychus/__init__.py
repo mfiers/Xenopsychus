@@ -31,15 +31,6 @@ MINCNT_FAIL = 'MINCNT@!' * 4
 SUBSET_FAIL = 'SUBSETT@!' * 4
 CAT_FAIL = 'CATCAT@!' * 4
 
-def getrm(kwargs, key, default=None):
-    rv = None
-    if key in kwargs:
-        rv = kwargs[key]
-        del kwargs[key]
-    if rv is None:
-        return default
-
-
 #
 # Decorators!
 #
@@ -116,14 +107,23 @@ def ensure_ax(method):
 
 def clean_spines(method):
     def decorator(self, *args, **kwargs ):
-        rv = method(self, *args, **kwargs)
+        showaxes = self.getarg(kwargs, 'showaxes', False)
+
+        method(self, *args, **kwargs)
+
         ax = self.ax
-        ax.get_xaxis().set_visible(False)
-        ax.get_yaxis().set_visible(False)
+        if not showaxes:
+            ax.get_xaxis().set_visible(False)
+            ax.get_yaxis().set_visible(False)
+            ax.spines['left'].set_visible(False)
+            ax.spines['bottom'].set_visible(False)
+        else:
+            ax.set_xlabel(self.x_name)
+            ax.set_ylabel(self.y_name)
+
+        ax.grid(False)
         ax.spines['right'].set_visible(False)
         ax.spines['top'].set_visible(False)
-        ax.spines['left'].set_visible(False)
-        ax.spines['bottom'].set_visible(False)
     return decorator
 
 def subset(method):
@@ -250,7 +250,6 @@ class Xenopsychus:
         self.cluster_outline = cluster_outline
         self.cluster_linewidth = cluster_linewidth
 
-
         # categorical colors
         self.cmap_cat = cmap_cat
         self.palette = palette
@@ -321,6 +320,26 @@ class Xenopsychus:
                 mpl.colors.Normalize(
                     vmin=kwargs['vmin'], vmax=kwargs['vmax']))
 
+
+    def getarg(self, kwargs, key, default):
+        rv = None
+        found_rv = False
+
+        if key in self.plotargs:
+            rv = self.plotargs[key]
+            found_rv = True
+            del self.plotargs[key]
+
+        if key in kwargs:
+            rv = kwargs[key]
+            found_rv = True
+            del kwargs[key]
+
+        if found_rv:
+            return rv
+        else:
+            return default
+
     def find_categories(self, data, C,
                         fracdiff=0.1):
 
@@ -363,6 +382,7 @@ class Xenopsychus:
 
         pa = copy(self.plotargs)
         pa.update(kwargs)
+
         # dummy plot
         self.hb = self.ax.hexbin(**pa)
         agg = agg.sort_index()
@@ -429,7 +449,6 @@ class Xenopsychus:
         palette[SUBSET_FAIL] = subset_fail_color
 
         self.hb = self.ax.hexbin(**pa)
-
         agg = self.find_categories(C=C, data=self.data_subset, fracdiff=fracdiff)
         facecolors = [palette[x] for x in agg.sort_index().values]
         self.hb.set(array=None, facecolors=facecolors)
