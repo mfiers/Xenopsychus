@@ -8,7 +8,6 @@ it does not seem to be - but who cares...
 
 import logging
 import math
-import warnings
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
@@ -21,93 +20,104 @@ import pandas as pd
 from matplotlib.patches import Patch
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-#from scipy.stats import binomtest
-#from statsmodels.stats.multitest import multipletests
+# from scipy.stats import binomtest
+# from statsmodels.stats.multitest import multipletests
 
 lg = logging.getLogger(__name__)
 lg.setLevel(logging.INFO)
 
-MINCNT_FAIL = 'MINCNT@!' * 4
-SUBSET_FAIL = 'SUBSETT@!' * 4
-CAT_FAIL = 'CATCAT@!' * 4
+MINCNT_FAIL = "MINCNT@!" * 4
+SUBSET_FAIL = "SUBSETT@!" * 4
+CAT_FAIL = "CATCAT@!" * 4
 
 #
 # Decorators!
 #
+
 
 def mincnt(method):
     """
     Filter the hexbin to remove all cells with < self.mincnt
     spots in there.
     """
-    def decorator(self, *args, **kwargs ):
-        mincnt = kwargs.pop('mincnt', self.mincnt)
-        mincnt_fail_color = kwargs.pop('mincnt_fail_color', self.mincnt_fail_color)
+
+    def decorator(self, *args, **kwargs):
+        mincnt = kwargs.pop("mincnt", self.mincnt)
+        mincnt_fail_color = kwargs.pop(
+            "mincnt_fail_color", self.mincnt_fail_color
+        )
 
         method(self, *args, **kwargs)
         if self.mincnt > 0:
-            #need to draw the thing first - to calculate colors
+            # need to draw the thing first - to calculate colors
             self.ax.figure.canvas.draw()
             facecolors = self.hb.get_facecolors()
-            cellcnt = (self.data_subset['_hb']
-                            .value_counts()
-                            .reindex(self.data['_hb'].unique())
-                            .fillna(0)
-                            .sort_index())
+            cellcnt = (
+                self.data_subset["_hb"]
+                .value_counts()
+                .reindex(self.data["_hb"].unique())
+                .fillna(0)
+                .sort_index()
+            )
             for i, cnt in enumerate(cellcnt):
                 if cnt <= mincnt:
                     facecolors[i] = self.ensure_rgba(mincnt_fail_color)
             self.hb.set(array=None, facecolors=facecolors)
+
     return decorator
 
+
 def add_colorbar(method):
-    def decorator(self, *args, **kwargs ):
-        colorbar = kwargs.pop('colorbar', self.colorbar)
+    def decorator(self, *args, **kwargs):
+        colorbar = kwargs.pop("colorbar", self.colorbar)
 
         rv = method(self, *args, **kwargs)
         if colorbar:
             ax = self.ax
             divider = make_axes_locatable(ax)
-            self.cax = divider.append_axes('right', size='5%', pad=0.05)
-            self.fig.colorbar(self.hb, cax=self.cax,
-                            orientation='vertical')
+            self.cax = divider.append_axes("right", size="5%", pad=0.05)
+            self.fig.colorbar(self.hb, cax=self.cax, orientation="vertical")
+
     return decorator
+
 
 def addborder(method):
     def decorator(self, *args, **kwargs):
-        border_x = kwargs.pop('border_x', self.border_x)
-        border_y = kwargs.pop('border_y', self.border_y)
+        border_x = kwargs.pop("border_x", self.border_x)
+        border_y = kwargs.pop("border_y", self.border_y)
         method(self, *args, **kwargs)
         xmin, xmax = self.ax.get_xlim()
         ymin, ymax = self.ax.get_ylim()
-        xd = border_x * (xmax-xmin)
-        yd = border_y * (ymax-ymin)
-        self.ax.set_xlim(xmin-xd, xmax+xd)
-        self.ax.set_ylim(ymin-yd, ymax+yd)
+        xd = border_x * (xmax - xmin)
+        yd = border_y * (ymax - ymin)
+        self.ax.set_xlim(xmin - xd, xmax + xd)
+        self.ax.set_ylim(ymin - yd, ymax + yd)
+
     return decorator
 
 
 def ensure_ax(method):
-    def decorator(self, *args, **kwargs ):
+    def decorator(self, *args, **kwargs):
         ax = None
-        if 'ax' in kwargs:
-            ax = kwargs['ax']
-            del kwargs['ax']
+        if "ax" in kwargs:
+            ax = kwargs["ax"]
+            del kwargs["ax"]
 
         if ax is None:
-            self.fig = plt.figure(figsize=self.figsize,
-                                    dpi=self.dpi)
+            self.fig = plt.figure(figsize=self.figsize, dpi=self.dpi)
             self.ax = self.fig.gca()
         else:
             self.ax = ax
             self.fig = self.ax.figure
 
         method(self, *args, **kwargs)
+
     return decorator
 
+
 def clean_spines(method):
-    def decorator(self, *args, **kwargs ):
-        showaxes = self.getarg(kwargs, 'showaxes', False)
+    def decorator(self, *args, **kwargs):
+        showaxes = self.getarg(kwargs, "showaxes", False)
 
         method(self, *args, **kwargs)
 
@@ -115,62 +125,71 @@ def clean_spines(method):
         if not showaxes:
             ax.get_xaxis().set_visible(False)
             ax.get_yaxis().set_visible(False)
-            ax.spines['left'].set_visible(False)
-            ax.spines['bottom'].set_visible(False)
+            ax.spines["left"].set_visible(False)
+            ax.spines["bottom"].set_visible(False)
         else:
             ax.set_xlabel(self.x_name)
             ax.set_ylabel(self.y_name)
 
         ax.grid(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['top'].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["top"].set_visible(False)
+
     return decorator
+
 
 def subset(method):
     def decorator(self, *args, **kwargs):
-        subset = kwargs.pop('subset', self.subset)
+        subset = kwargs.pop("subset", self.subset)
         if subset is None:
             self.data_subset = self.data
         else:
             self.data_subset = self.data[subset]
         method(self, *args, **kwargs)
+
     return decorator
 
 
 def nosubset(method):
     def decorator(self, *args, **kwargs):
-        subset = kwargs.pop('subset', self.subset)
+        subset = kwargs.pop("subset", self.subset)
         self.data_subset = self.data
         if subset is not None:
             print("Warning - cannot subset on plot_agg!")
         method(self, *args, **kwargs)
+
     return decorator
+
 
 def cluster_marker_lines(method):
     def decorator(self, *args, **kwargs):
-        cluster_show = kwargs.pop('cluster_show', self.cluster_show)
-        cluster_linecolor = kwargs.pop('cluster_linecolor', self.cluster_linecolor)
-        cluster_outline = kwargs.pop('cluster_outline', self.cluster_outline)
-        cluster_linewidth = kwargs.pop('cluster_linewidth', self.cluster_linewidth)
+        cluster_show = kwargs.pop("cluster_show", self.cluster_show)
+        cluster_linecolor = kwargs.pop(
+            "cluster_linecolor", self.cluster_linecolor
+        )
+        cluster_outline = kwargs.pop("cluster_outline", self.cluster_outline)
+        cluster_linewidth = kwargs.pop(
+            "cluster_linewidth", self.cluster_linewidth
+        )
 
         method(self, *args, **kwargs)
 
         def find_borders(row, q, direction):
             dx, dy = dict(
                 left=(0, -2),
-                topleft = (1, -1),
-                topright = (1, 1),
+                topleft=(1, -1),
+                topright=(1, 1),
                 right=(0, 2),
-                bottomleft = (-1, -1),
-                bottomright = (-1, 1),
+                bottomleft=(-1, -1),
+                bottomright=(-1, 1),
             )[direction]
 
-            x = row['r1'] + dx
-            y = row['r0'] + dy
+            x = row["r1"] + dx
+            y = row["r0"] + dy
             oc = q[(q.r1 == x) & (q.r0 == y)]
             if len(oc) == 0:
                 return 1
-            elif oc.iloc[0]['array'] == row['array']:
+            elif oc.iloc[0]["array"] == row["array"]:
                 return 0
             else:
                 return 2
@@ -178,28 +197,36 @@ def cluster_marker_lines(method):
         if cluster_show is not None:
             cats = self.find_categories(self.data, cluster_show)
             valldata = pd.DataFrame(self.hb.get_offsets())
-            valldata['array'] = list(cats)
-            valldata['r0'] = valldata[0].rank(method='dense').astype(int)
-            valldata['r1'] = valldata[1].rank(method='dense').astype(int)
+            valldata["array"] = list(cats)
+            valldata["r0"] = valldata[0].rank(method="dense").astype(int)
+            valldata["r1"] = valldata[1].rank(method="dense").astype(int)
 
             vertices = self.hb.get_paths()[0].vertices
-            dirsel = [('right', slice(0,2)),
-                    ('topright', slice(1,3)),
-                    ('topleft', slice(2,4)),
-                    ('left', slice(3,5)),
-                    ('bottomleft', slice(4,6)),
-                    ('bottomright', slice(5,7)),
-                    ]
+            dirsel = [
+                ("right", slice(0, 2)),
+                ("topright", slice(1, 3)),
+                ("topleft", slice(2, 4)),
+                ("left", slice(3, 5)),
+                ("bottomleft", slice(4, 6)),
+                ("bottomright", slice(5, 7)),
+            ]
 
             rcutoff = 1 if cluster_outline else 2
             for direction, vsel in dirsel:
-                borders = valldata.apply(find_borders, q=valldata, direction=direction, axis=1)
+                borders = valldata.apply(
+                    find_borders, q=valldata, direction=direction, axis=1
+                )
                 for i, (_, r) in enumerate(borders.items()):
                     if r >= rcutoff:
                         xx = vertices[vsel, 0] + valldata.iloc[i][0]
                         yy = vertices[vsel, 1] + valldata.iloc[i][1]
-                        self.ax.plot(xx, yy, c=cluster_linecolor, zorder=10, lw=cluster_linewidth)
-
+                        self.ax.plot(
+                            xx,
+                            yy,
+                            c=cluster_linecolor,
+                            zorder=10,
+                            lw=cluster_linewidth,
+                        )
 
     return decorator
 
@@ -214,26 +241,36 @@ def supadec(method):
     Returns:
         method: decorated methods
     """
-    return cluster_marker_lines(mincnt(addborder(clean_spines(ensure_ax(method)))))
+    return cluster_marker_lines(
+        mincnt(addborder(clean_spines(ensure_ax(method))))
+    )
 
 
 class Xenopsychus:
 
-    def __init__(self, data, x_name, y_name,
-                 figsize=(5, 4), dpi=120,
-                 colorbar=True,  cmap_cat='Set2',
-                 mincnt=5, palette=None,
-                 border_x = 0.,
-                 border_y = 0.,
-                 cluster_show = None,
-                 cluster_linecolor = 'black',
-                 cluster_outline = False,
-                 cluster_linewidth = 1.5,
-                 cat_fail_color='lightgrey',
-                 mincnt_fail_color='lightgrey',
-                 subset_fail_color='lightgrey',
-                 subset=None,
-                 **plotargs):
+    def __init__(
+        self,
+        data,
+        x_name,
+        y_name,
+        figsize=(5, 4),
+        dpi=120,
+        colorbar=True,
+        cmap_cat="Set2",
+        mincnt=5,
+        palette=None,
+        border_x=0.0,
+        border_y=0.0,
+        cluster_show=None,
+        cluster_linecolor="black",
+        cluster_outline=False,
+        cluster_linewidth=1.5,
+        cat_fail_color="lightgrey",
+        mincnt_fail_color="lightgrey",
+        subset_fail_color="lightgrey",
+        subset=None,
+        **plotargs
+    ):
 
         # core -
         self.data = data
@@ -277,21 +314,25 @@ class Xenopsychus:
         # set a few defaults for hexbin
         # can be overridden by anything in the
         # __init___ call.
-        for k, v in dict(mincnt=1,
-                         linewidths=0.25,
-                         gridsize=16,
-                         edgecolors='black',
-                         cmap='YlGnBu').items():
+        for k, v in dict(
+            mincnt=1,
+            linewidths=0.25,
+            gridsize=16,
+            edgecolors="black",
+            cmap="YlGnBu",
+        ).items():
             self.plotargs[k] = self.plotargs.get(k, v)
 
         # pull x, y vectors from self.data
-        self.plotargs['x'] = self.data[self.x_name]
-        self.plotargs['y'] = self.data[self.y_name]
+        self.plotargs["x"] = self.data[self.x_name]
+        self.plotargs["y"] = self.data[self.y_name]
 
         # first step - calculate hexin IDs for every cell
-        self.data['_hb'] = binbin(x=self.plotargs['x'],
-                                  y=self.plotargs['y'],
-                                  gridsize=self.plotargs['gridsize'],)
+        self.data["_hb"] = binbin(
+            x=self.plotargs["x"],
+            y=self.plotargs["y"],
+            gridsize=self.plotargs["gridsize"],
+        )
 
     #
     # Helper functions
@@ -308,18 +349,18 @@ class Xenopsychus:
             return x
 
     def apply_agg(self, agg, fillna=0, **kwargs):
-        agg = (agg.reindex(self.data['_hb'].unique())
-                .fillna(fillna)
-                .sort_index())
+        agg = (
+            agg.reindex(self.data["_hb"].unique()).fillna(fillna).sort_index()
+        )
+        self.agg = agg
         self.hb.set(array=agg.values)
-        if kwargs.get('vmin') is None:
-            kwargs['vmin'] = agg.quantile(0.025)
-        if kwargs.get('vmax') is None:
-            kwargs['vmax'] = agg.quantile(0.975)
+        if kwargs.get("vmin") is None:
+            kwargs["vmin"] = agg.quantile(0.025)
+        if kwargs.get("vmax") is None:
+            kwargs["vmax"] = agg.quantile(0.975)
         self.hb.set_norm(
-                mpl.colors.Normalize(
-                    vmin=kwargs['vmin'], vmax=kwargs['vmax']))
-
+            mpl.colors.Normalize(vmin=kwargs["vmin"], vmax=kwargs["vmax"])
+        )
 
     def getarg(self, kwargs, key, default):
         rv = None
@@ -340,8 +381,7 @@ class Xenopsychus:
         else:
             return default
 
-    def find_categories(self, data, C,
-                        fracdiff=0.1):
+    def find_categories(self, data, C, fracdiff=0.1):
 
         def count_most(r):
             """
@@ -366,10 +406,13 @@ class Xenopsychus:
                 else:
                     return ml
 
-        agg = data.groupby('_hb')[C].agg(count_most)
-        agg = agg.reindex(self.data['_hb'].unique()).fillna(SUBSET_FAIL).sort_index()
+        agg = data.groupby("_hb")[C].agg(count_most)
+        agg = (
+            agg.reindex(self.data["_hb"].unique())
+            .fillna(SUBSET_FAIL)
+            .sort_index()
+        )
         return agg
-
 
     #
     # Plotting functions
@@ -387,14 +430,13 @@ class Xenopsychus:
         self.hb = self.ax.hexbin(**pa)
         agg = agg.sort_index()
         self.hb.set(array=agg.values)
-        if kwargs.get('vmin') is None:
-            kwargs['vmin'] = agg.quantile(0.025)
-        if kwargs.get('vmax') is None:
-            kwargs['vmax'] = agg.quantile(0.975)
+        if kwargs.get("vmin") is None:
+            kwargs["vmin"] = agg.quantile(0.025)
+        if kwargs.get("vmax") is None:
+            kwargs["vmax"] = agg.quantile(0.975)
         self.hb.set_norm(
-            mpl.colors.Normalize(
-                vmin=kwargs['vmin'], vmax=kwargs['vmax']))
-
+            mpl.colors.Normalize(vmin=kwargs["vmin"], vmax=kwargs["vmax"])
+        )
 
     @add_colorbar
     @supadec
@@ -404,21 +446,56 @@ class Xenopsychus:
         pa.update(kwargs)
         self.hb = self.ax.hexbin(**pa)
 
-        agg = self.data_subset.groupby('_hb')[C].mean()
+        agg = self.data_subset.groupby("_hb")[C].mean()
         self.apply_agg(agg, **pa)
+
+    # @add_colorbar
+    # @supadec
+    # @subset
+    # def plot_num_diff(self, C, D, ax=None, **kwargs):
+    #     pa = copy(self.plotargs)
+    #     pa.update(kwargs)
+    #     self.hb = self.ax.hexbin(**pa)
+    #     vext = 3
+
+    #     def numdiff(r, val, group):
+    #         A = r[r[group]][val]
+    #         B = r[~r[group]][val]
+    #         if min(len(A), len(B)) < 5:
+    #             return np.nan
+    #         elif B.mean() == 0:
+    #             return vext
+    #         rv = np.log2(A.mean() / B.mean())
+    #         if rv < -vext:
+    #             return -vext
+    #         elif rv > vext:
+    #             return vext
+    #         else:
+    #             return rv
+
+    #     agg = self.data_subset.groupby("_hb")[[C, D]].apply(
+    #         numdiff, val=C, group=D
+    #     )
+    #     if kwargs.get("vmin") is None:
+    #         kwargs["vmin"] = agg.quantile(0.025)
+    #     if kwargs.get("vmax") is None:
+    #         kwargs["vmax"] = agg.quantile(0.975)
+
+    #     vmin, vmax = kwargs["vmin"], kwargs["vmax"]
+    #     vext = min(vext, max(vmin, vmax))
+    #     pa["vmin"], pa["vmax"] = -vext, vext
+    #     pa["cmap"] = "coolwarm"
+    #     self.apply_agg(agg, **pa)
 
     @supadec
     @subset
-    def plot_cat(self, C,
-                 palette=None,
-                 fracdiff=0.1,
-                 **kwargs):
+    def plot_cat(self, C, palette=None, fracdiff=0.1, **kwargs):
         """
         Plot categorical hexbin
 
         Args:
             C (str): Column in .data to plot
-            paletted (dict): field to color map
+            palette (dict): field to color map
             fracdiff (float): min fraction difference
             mincnt (int): min no points to assign
             failcol (str or (r,g,b)): color in case of unclear assignment
@@ -427,9 +504,13 @@ class Xenopsychus:
             hexbin
         """
 
-        subset_fail_color = kwargs.pop('subset_fail_color', self.subset_fail_color)
-        cat_fail_color = kwargs.pop('cat_fail_color', self.cat_fail_color)
-        mincnt_fail_color = kwargs.pop('mincnt_fail_color', self.mincnt_fail_color)
+        subset_fail_color = kwargs.pop(
+            "subset_fail_color", self.subset_fail_color
+        )
+        cat_fail_color = kwargs.pop("cat_fail_color", self.cat_fail_color)
+        mincnt_fail_color = kwargs.pop(
+            "mincnt_fail_color", self.mincnt_fail_color
+        )
 
         pa = copy(self.plotargs)
         pa.update(kwargs)
@@ -438,21 +519,21 @@ class Xenopsychus:
             if self.palette is None:
                 allcats = sorted(self.data[C].unique())
                 cmap = plt.colormaps.get(self.cmap_cat)
-                palette = {x:  cmap(i)
-                        for (i, x) in enumerate(allcats)}
+                palette = {x: cmap(i) for (i, x) in enumerate(allcats)}
             else:
                 palette = self.palette
 
-        #ensure we can fail - add cat_fail_color
+        # ensure we can fail - add cat_fail_color
         palette[CAT_FAIL] = cat_fail_color
         palette[MINCNT_FAIL] = mincnt_fail_color
         palette[SUBSET_FAIL] = subset_fail_color
 
         self.hb = self.ax.hexbin(**pa)
-        agg = self.find_categories(C=C, data=self.data_subset, fracdiff=fracdiff)
+        agg = self.find_categories(
+            C=C, data=self.data_subset, fracdiff=fracdiff
+        )
         facecolors = [palette[x] for x in agg.sort_index().values]
         self.hb.set(array=None, facecolors=facecolors)
-
 
     @add_colorbar
     @supadec
@@ -462,8 +543,65 @@ class Xenopsychus:
         pa = copy(self.plotargs)
         pa.update(kwargs)
         self.hb = self.ax.hexbin(**pa)
-        # calculate baed on data_subset
-        agg = self.data_subset['_hb'].value_counts()
+        # calculate based on data_subset
+        agg = self.data_subset["_hb"].value_counts()
+        self.apply_agg(agg, fillna=0, **pa)
+
+    @add_colorbar
+    @supadec
+    @subset
+    def plot_count_diff(self, C, vext=3, method="delta", **kwargs):
+
+        # do a regular one to have a hexbin
+        pa = copy(self.plotargs)
+        pa.update(kwargs)
+        self.hb = self.ax.hexbin(**pa)
+
+        from scipy.stats import binom
+
+        def binom_diff(r, val, dp):
+            # print(r[val].head())
+            k = (r[val]).sum()
+            n = len(r)
+            p = k / n
+            if p < dp:
+                rv = np.log10(binom.cdf(k, n, dp))
+            else:
+                rv = -np.log10(binom.sf(k, n, dp))
+            # print(k, n, p, dp, rv)
+            return rv
+
+        def numdiff(r, val):
+            A = r[val].sum()
+            B = len(r) - A
+            if A + B < 2:
+                return np.nan
+            return B - A
+
+        if method == "delta":
+            aggfunc = numdiff
+        elif method == "binomlp":
+            p = sum(self.data_subset[C]) / len(self.data_subset[C])
+            # print(C)
+            # print(self.data_subset[C].value_counts())
+            # print(p)
+            aggfunc = partial(binom_diff, dp=p)
+
+        agg = self.data_subset.groupby("_hb")[[C]].apply(aggfunc, val=C)
+
+        vext = max(vext, max(abs(agg.quantile(0.1)), abs(agg.quantile(0.9))))
+
+        if "vmin" in kwargs:
+            pa["vmin"] = kwargs["vmin"]
+        else:
+            pa["vmin"] = -vext
+
+        if "vmax" in kwargs:
+            pa["vmax"] = kwargs["vmax"]
+        else:
+            pa["vmax"] = vext
+
+        self.vext = vext
         self.apply_agg(agg, fillna=0, **pa)
 
 
@@ -490,7 +628,7 @@ def binbin(x, y, gridsize, **xargs):
     y = np.asarray(y, float)
 
     # remnant from mpl code - for possible log transform
-    tx,ty = x, y
+    tx, ty = x, y
 
     xmin, xmax = (tx.min(), tx.max()) if len(x) else (0, 1)
     ymin, ymax = (ty.min(), ty.max()) if len(y) else (0, 1)
@@ -506,7 +644,7 @@ def binbin(x, y, gridsize, **xargs):
 
     # In the x-direction, the hexagons exactly cover the region from
     # xmin to xmax. Need some padding to avoid roundoff errors.
-    padding = 1.e-9 * (xmax - xmin)
+    padding = 1.0e-9 * (xmax - xmin)
     xmin -= padding
     xmax += padding
     sx = (xmax - xmin) / nx
@@ -522,14 +660,20 @@ def binbin(x, y, gridsize, **xargs):
     iy2 = np.floor(iy).astype(int)
 
     # flat indices, plus one so that out-of-range points go to position 0.
-    i1 = np.where((0 <= ix1) & (ix1 < nx1) & (0 <= iy1) & (iy1 < ny1),
-                  ix1 * ny1 + iy1 + 1, 0)
-    i2 = np.where((0 <= ix2) & (ix2 < nx2) & (0 <= iy2) & (iy2 < ny2),
-                  ix2 * ny2 + iy2 + 1, 0)
+    i1 = np.where(
+        (0 <= ix1) & (ix1 < nx1) & (0 <= iy1) & (iy1 < ny1),
+        ix1 * ny1 + iy1 + 1,
+        0,
+    )
+    i2 = np.where(
+        (0 <= ix2) & (ix2 < nx2) & (0 <= iy2) & (iy2 < ny2),
+        ix2 * ny2 + iy2 + 1,
+        0,
+    )
 
     d1 = (ix - ix1) ** 2 + 3.0 * (iy - iy1) ** 2
     d2 = (ix - ix2 - 0.5) ** 2 + 3.0 * (iy - iy2 - 0.5) ** 2
-    bdist = (d1 < d2)
+    bdist = d1 < d2
 
     # here I take over again
     # calculate per orignal data point the
@@ -566,8 +710,6 @@ def binbin(x, y, gridsize, **xargs):
 #     return D, arr
 
 
-
-
 # def get_array_score(C, agg_func, subset=None,
 #                     **hbargs):
 #     """
@@ -594,7 +736,6 @@ def binbin(x, y, gridsize, **xargs):
 #     #print(arr)
 
 #     return D, agg
-
 
 
 # def get_hexbin_categorical(ax, C, generate_OR=False, **hbargs):
@@ -1048,7 +1189,6 @@ def binbin(x, y, gridsize, **xargs):
 #         alphas += 0.5
 
 #         hb.set(array=None, facecolors=face_colors, alpha=alphas)
-
 
 
 #     # onto the visuals...
