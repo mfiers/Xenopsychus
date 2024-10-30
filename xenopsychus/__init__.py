@@ -19,7 +19,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.patches import Patch
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from scipy.stats import binom
 
+        
 # from scipy.stats import binomtest
 # from statsmodels.stats.multitest import multipletests
 
@@ -449,43 +451,43 @@ class Xenopsychus:
         agg = self.data_subset.groupby("_hb")[C].mean()
         self.apply_agg(agg, **pa)
 
-    # @add_colorbar
-    # @supadec
-    # @subset
-    # def plot_num_diff(self, C, D, ax=None, **kwargs):
-    #     pa = copy(self.plotargs)
-    #     pa.update(kwargs)
-    #     self.hb = self.ax.hexbin(**pa)
-    #     vext = 3
+    @add_colorbar
+    @supadec
+    @subset
+    def plot_num_diff(self, C, D, ax=None, **kwargs):
+        pa = copy(self.plotargs)
+        pa.update(kwargs)
+        self.hb = self.ax.hexbin(**pa)
+        vext = 3
 
-    #     def numdiff(r, val, group):
-    #         A = r[r[group]][val]
-    #         B = r[~r[group]][val]
-    #         if min(len(A), len(B)) < 5:
-    #             return np.nan
-    #         elif B.mean() == 0:
-    #             return vext
-    #         rv = np.log2(A.mean() / B.mean())
-    #         if rv < -vext:
-    #             return -vext
-    #         elif rv > vext:
-    #             return vext
-    #         else:
-    #             return rv
+        def numdiff(r, val, group):
+            A = r[r[group]][val]
+            B = r[~r[group]][val]
+            if min(len(A), len(B)) < 5:
+                return np.nan
+            elif B.mean() == 0:
+                return vext
+            rv = np.log2(A.mean() / B.mean())
+            if rv < -vext:
+                return -vext
+            elif rv > vext:
+                return vext
+            else:
+                return rv
 
-    #     agg = self.data_subset.groupby("_hb")[[C, D]].apply(
-    #         numdiff, val=C, group=D
-    #     )
-    #     if kwargs.get("vmin") is None:
-    #         kwargs["vmin"] = agg.quantile(0.025)
-    #     if kwargs.get("vmax") is None:
-    #         kwargs["vmax"] = agg.quantile(0.975)
+        agg = self.data_subset.groupby("_hb")[[C, D]].apply(
+            numdiff, val=C, group=D
+        )
+        if kwargs.get("vmin") is None:
+            kwargs["vmin"] = agg.quantile(0.025)
+        if kwargs.get("vmax") is None:
+            kwargs["vmax"] = agg.quantile(0.975)
 
-    #     vmin, vmax = kwargs["vmin"], kwargs["vmax"]
-    #     vext = min(vext, max(vmin, vmax))
-    #     pa["vmin"], pa["vmax"] = -vext, vext
-    #     pa["cmap"] = "coolwarm"
-    #     self.apply_agg(agg, **pa)
+        vmin, vmax = kwargs["vmin"], kwargs["vmax"]
+        vext = min(vext, max(vmin, vmax))
+        pa["vmin"], pa["vmax"] = -vext, vext
+        pa["cmap"] = "coolwarm"
+        self.apply_agg(agg, **pa)
 
     @supadec
     @subset
@@ -603,6 +605,62 @@ class Xenopsychus:
 
         self.vext = vext
         self.apply_agg(agg, fillna=0, **pa)
+
+    # @add_colorbar
+    # @supadec
+    # @subset
+    # def plot_num_diff(self, C, vext=3, method="delta", **kwargs):
+
+    #     # do a regular one to have a hexbin
+    #     pa = copy(self.plotargs)
+    #     pa.update(kwargs)
+    #     self.hb = self.ax.hexbin(**pa)
+
+
+    #     def binom_diff(r, val, dp):
+    #         # print(r[val].head())
+    #         k = (r[val]).sum()
+    #         n = len(r)
+    #         p = k / n
+    #         if p < dp:
+    #             rv = np.log10(binom.cdf(k, n, dp))
+    #         else:
+    #             rv = -np.log10(binom.sf(k, n, dp))
+    #         # print(k, n, p, dp, rv)
+    #         return rv
+
+    #     def numdiff(r, val):
+    #         A = r[val].sum()
+    #         B = len(r) - A
+    #         if A + B < 2:
+    #             return np.nan
+    #         return B - A
+
+    #     if method == "delta":
+    #         aggfunc = numdiff
+    #     elif method == "binomlp":
+    #         p = sum(self.data_subset[C]) / len(self.data_subset[C])
+    #         # print(C)
+    #         # print(self.data_subset[C].value_counts())
+    #         # print(p)
+    #         aggfunc = partial(binom_diff, dp=p)
+
+    #     agg = self.data_subset.groupby("_hb")[[C]].apply(aggfunc, val=C)
+
+    #     vext = max(vext, max(abs(agg.quantile(0.1)), abs(agg.quantile(0.9))))
+
+    #     if "vmin" in kwargs:
+    #         pa["vmin"] = kwargs["vmin"]
+    #     else:
+    #         pa["vmin"] = -vext
+
+    #     if "vmax" in kwargs:
+    #         pa["vmax"] = kwargs["vmax"]
+    #     else:
+    #         pa["vmax"] = vext
+
+    #     self.vext = vext
+    #     self.apply_agg(agg, fillna=0, **pa)
 
 
 def binbin(x, y, gridsize, **xargs):
