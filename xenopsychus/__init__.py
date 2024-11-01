@@ -21,7 +21,6 @@ from matplotlib.patches import Patch
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.stats import binom
 
-        
 # from scipy.stats import binomtest
 # from statsmodels.stats.multitest import multipletests
 
@@ -73,7 +72,7 @@ def add_colorbar(method):
     def decorator(self, *args, **kwargs):
         colorbar = kwargs.pop("colorbar", self.colorbar)
 
-        rv = method(self, *args, **kwargs)
+        method(self, *args, **kwargs)
         if colorbar:
             ax = self.ax
             divider = make_axes_locatable(ax)
@@ -420,25 +419,25 @@ class Xenopsychus:
     # Plotting functions
     #
 
-    @add_colorbar
-    @supadec
-    @nosubset
-    def plot_agg(self, agg, **kwargs):
+    # @add_colorbar
+    # @supadec
+    # @nosubset
+    # def plot_agg(self, agg, **kwargs):
 
-        pa = copy(self.plotargs)
-        pa.update(kwargs)
+    #     pa = copy(self.plotargs)
+    #     pa.update(kwargs)
 
-        # dummy plot
-        self.hb = self.ax.hexbin(**pa)
-        agg = agg.sort_index()
-        self.hb.set(array=agg.values)
-        if kwargs.get("vmin") is None:
-            kwargs["vmin"] = agg.quantile(0.025)
-        if kwargs.get("vmax") is None:
-            kwargs["vmax"] = agg.quantile(0.975)
-        self.hb.set_norm(
-            mpl.colors.Normalize(vmin=kwargs["vmin"], vmax=kwargs["vmax"])
-        )
+    #     # dummy plot
+    #     # self.hb = self.ax.hexbin(**pa)
+    #     agg = agg.sort_index()
+    #     self.hb.set(array=agg.values)
+    #     if kwargs.get("vmin") is None:
+    #         kwargs["vmin"] = agg.quantile(0.025)
+    #     if kwargs.get("vmax") is None:
+    #         kwargs["vmax"] = agg.quantile(0.975)
+    #     self.hb.set_norm(
+    #         mpl.colors.Normalize(vmin=kwargs["vmin"], vmax=kwargs["vmax"])
+    #     )
 
     @add_colorbar
     @supadec
@@ -451,43 +450,43 @@ class Xenopsychus:
         agg = self.data_subset.groupby("_hb")[C].mean()
         self.apply_agg(agg, **pa)
 
-    @add_colorbar
-    @supadec
-    @subset
-    def plot_num_diff(self, C, D, ax=None, **kwargs):
-        pa = copy(self.plotargs)
-        pa.update(kwargs)
-        self.hb = self.ax.hexbin(**pa)
-        vext = 3
+    # @add_colorbar
+    # @supadec
+    # @subset
+    # def plot_num_diff(self, C, D, ax=None, **kwargs):
+    #     pa = copy(self.plotargs)
+    #     pa.update(kwargs)
+    #     self.hb = self.ax.hexbin(**pa)
+    #     vext = 3
 
-        def numdiff(r, val, group):
-            A = r[r[group]][val]
-            B = r[~r[group]][val]
-            if min(len(A), len(B)) < 5:
-                return np.nan
-            elif B.mean() == 0:
-                return vext
-            rv = np.log2(A.mean() / B.mean())
-            if rv < -vext:
-                return -vext
-            elif rv > vext:
-                return vext
-            else:
-                return rv
+    #     def numdiff(r, val, group):
+    #         A = r[r[group]][val]
+    #         B = r[~r[group]][val]
+    #         if min(len(A), len(B)) < 5:
+    #             return np.nan
+    #         elif B.mean() == 0:
+    #             return vext
+    #         rv = np.log2(A.mean() / B.mean())
+    #         if rv < -vext:
+    #             return -vext
+    #         elif rv > vext:
+    #             return vext
+    #         else:
+    #             return rv
 
-        agg = self.data_subset.groupby("_hb")[[C, D]].apply(
-            numdiff, val=C, group=D
-        )
-        if kwargs.get("vmin") is None:
-            kwargs["vmin"] = agg.quantile(0.025)
-        if kwargs.get("vmax") is None:
-            kwargs["vmax"] = agg.quantile(0.975)
+    #     agg = self.data_subset.groupby("_hb")[[C, D]].apply(
+    #         numdiff, val=C, group=D
+    #     )
+    #     if kwargs.get("vmin") is None:
+    #         kwargs["vmin"] = agg.quantile(0.025)
+    #     if kwargs.get("vmax") is None:
+    #         kwargs["vmax"] = agg.quantile(0.975)
 
-        vmin, vmax = kwargs["vmin"], kwargs["vmax"]
-        vext = min(vext, max(vmin, vmax))
-        pa["vmin"], pa["vmax"] = -vext, vext
-        pa["cmap"] = "coolwarm"
-        self.apply_agg(agg, **pa)
+    #     vmin, vmax = kwargs["vmin"], kwargs["vmax"]
+    #     vext = min(vext, max(vmin, vmax))
+    #     pa["vmin"], pa["vmax"] = -vext, vext
+    #     pa["cmap"] = "coolwarm"
+    #     self.apply_agg(agg, **pa)
 
     @supadec
     @subset
@@ -532,10 +531,41 @@ class Xenopsychus:
 
         self.hb = self.ax.hexbin(**pa)
         agg = self.find_categories(
-            C=C, data=self.data_subset, fracdiff=fracdiff
-        )
+            C=C, data=self.data_subset, fracdiff=fracdiff)
+        #print(agg)
         facecolors = [palette[x] for x in agg.sort_index().values]
+#        print(facecolors)
         self.hb.set(array=None, facecolors=facecolors)
+
+    @add_colorbar
+    @supadec
+    @subset
+    def plot_agg(self, agg,  **kwargs):
+        """
+        Plot categorical hexbin
+
+        Args:
+            C (str): Column in .data to plot
+            palette (dict): field to color map
+            fracdiff (float): min fraction difference
+            mincnt (int): min no points to assign
+            failcol (str or (r,g,b)): color in case of unclear assignment
+
+        Returns:
+            hexbin
+        """
+
+        pa = copy(self.plotargs)
+        pa.update(kwargs)
+
+        self.hb = self.ax.hexbin(**pa)
+
+        self.apply_agg(agg, **pa)
+        return self.hb
+
+#        facecolors = [palette(norm(x)) for x in agg.sort_index().values]
+#        print(facecolors)
+#        self.hb.set(array=None, facecolors=facecolors)
 
     @add_colorbar
     @supadec
