@@ -15,6 +15,7 @@ from functools import partial
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
+from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
 from matplotlib.patches import Patch
@@ -268,6 +269,7 @@ class Xenopsychus:
         cluster_linewidth=1.5,
         cat_fail_color="lightgrey",
         mincnt_fail_color="lightgrey",
+        legend=True,
         subset_fail_color="lightgrey",
         subset=None,
         **plotargs
@@ -305,6 +307,9 @@ class Xenopsychus:
 
         # add a colorbar?
         self.colorbar = colorbar
+
+        # or a legend
+        self.legend = legend
 
         # subsetting data
         # needs to be done carefully - we take the bin ids' from the full dataset.
@@ -532,10 +537,23 @@ class Xenopsychus:
         self.hb = self.ax.hexbin(**pa)
         agg = self.find_categories(
             C=C, data=self.data_subset, fracdiff=fracdiff)
+
         #print(agg)
         facecolors = [palette[x] for x in agg.sort_index().values]
 #        print(facecolors)
+        legend_patches = []
+        for unique in sorted(agg.unique()):
+            if unique == CAT_FAIL:
+                label = 'No category'
+            elif unique == MINCNT_FAIL:
+                label = 'Too few data points'
+            else:
+                label = str(unique)
+            color = palette[unique]
+            legend_patches.append(Patch(facecolor=color, label=label))
         self.hb.set(array=None, facecolors=facecolors)
+        if self.legend:
+            plt.legend(handles=legend_patches, loc='center left', bbox_to_anchor=(1.05, 0.5))
 
     @add_colorbar
     @supadec
