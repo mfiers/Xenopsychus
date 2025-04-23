@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "Xenopsychus"
+dynamic = ["version"]
+description = ""
+authors = [
+    { name = "Mark Fiers", email = "mark.fiers.42@gmail.com" }
+]
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3"
+]
+dependencies = [
+    "matplotlib",
+    "numpy",
+    "pandas",
+    'importlib; python_version == "2.6"'
+]
+
+
+[tool.hatch.version]
+source="vcs"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build]
+include = [
+    "xenopsychus/**",
+    "VERSION.txt"
+]
