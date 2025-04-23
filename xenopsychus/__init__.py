@@ -452,7 +452,6 @@ class Xenopsychus:
 
         pa = copy(self.plotargs)
         pa.update(kwargs)
-        print(aggfunc * 1000)
         self.hb = self.ax.hexbin(**pa)
         if aggfunc == 'mean':
             agg = self.data_subset.groupby('_hb')[C].mean()
