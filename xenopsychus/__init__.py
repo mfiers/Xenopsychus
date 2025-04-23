@@ -399,12 +399,20 @@ class Xenopsychus:
     @add_colorbar
     @supadec
     @subset
-    def plot_num(self, C, ax=None, **kwargs):
+    def plot_num(self, C, ax=None,
+                 aggfunc='sum', **kwargs):
+
         pa = copy(self.plotargs)
         pa.update(kwargs)
+        print(aggfunc * 1000)
         self.hb = self.ax.hexbin(**pa)
+        if aggfunc == 'mean':
+            agg = self.data_subset.groupby('_hb')[C].mean()
+        elif aggfunc == 'sum':
+            agg = self.data_subset.groupby('_hb')[C].sum()
+        else:
+            raise Exception(f'Unknown aggfun: "{aggfunc}"')
 
-        agg = self.data_subset.groupby('_hb')[C].mean()
         self.apply_agg(agg, **pa)
 
     @supadec
